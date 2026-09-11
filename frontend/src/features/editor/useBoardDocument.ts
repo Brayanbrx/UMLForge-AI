@@ -1,0 +1,422 @@
+import { HocuspocusProvider } from '@hocuspocus/provider';
+import {
+  emptyBoardState,
+  type BoardState,
+  type CommandBatch,
+  type SemanticModel,
+  type ValidationIssue,
+} from '@uml/contracts';
+import { validateModel, validateProposalPreconditions } from '@uml/domain-core';
+import { applyBatchToDocument, readBoardState } from '@uml/yjs-adapter';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import * as Y from 'yjs';
+import { api, currentAccessToken, refreshSession } from '../../lib/api.js';
+
+/**
+ * Enlaza React con el documento colaborativo.
+ *
+ * El modelo **no** se guarda en el estado de la interfaz: vive en el documento y
+ * lo que React mantiene es una proyeccion que se recalcula en cada actualizacion.
+ * Guardarlo en Zustand crearia una segunda copia que habria que mantener
+ * sincronizada a mano, y el editor visual siempre es una proyeccion del
+ * documento, nunca la fuente de verdad (plan maestro 4.5).
+ */
+
+export type ConnectionStatus = 'conectando' | 'conectado' | 'desconectado' | 'rechazado';
+
+export interface Participant {
+  readonly clientId: number;
+  readonly displayName: string;
+  readonly color: string;
+  /** Identificador del elemento que esta editando, si lo hay. */
+  readonly editing: string | null;
+}
+
+export interface BoardDocument {
+  readonly state: BoardState;
+  readonly issues: readonly ValidationIssue[];
+  readonly status: ConnectionStatus;
+  readonly rejection: string | null;
+  readonly accessNotice: string | null;
+  readonly participants: readonly Participant[];
+  readonly canWrite: boolean;
+  /** Aplica un lote. Devuelve los hallazgos si se rechaza. */
+  dispatch(
+    batch: CommandBatch,
+    expected?: SemanticModel,
+    scope?: 'AFFECTED' | 'MODEL',
+  ): readonly ValidationIssue[] | null;
+  /** Anuncia que elemento se esta editando, para la presencia. */
+  announceEditing(elementId: string | null): void;
+}
+
+const COLORES = [
+  '#2563eb',
+  '#16a34a',
+  '#db2777',
+  '#ea580c',
+  '#7c3aed',
+  '#0891b2',
+  '#ca8a04',
+  '#dc2626',
+];
+
+function colorPara(clientId: number): string {
+  return COLORES[Math.abs(clientId) % COLORES.length] as string;
+}
+
+export function useBoardDocument(
+  room: string | null,
+  me: { displayName: string } | null,
+  /**
+   * Pizarra a la que atribuir los lotes aplicados (RF-A09).
+   *
+   * Va aparte de `room` porque el registro es HTTP y la sala es del canal de
+   * tiempo real: CA-023.1 dice que el protocolo colaborativo transporta
+   * actualizaciones del documento, no comandos, y que los comandos se registran
+   * para auditoria y no para sincronizar.
+   */
+  boardId: string | null = null,
+): BoardDocument {
+  const [doc, setDoc] = useState(() => new Y.Doc());
+  const [canWrite, setCanWrite] = useState(false);
+  const writeAllowed = useRef(false);
+  const [accessNotice, setAccessNotice] = useState<string | null>(null);
+  const [state, setState] = useState<BoardState>(() => emptyBoardState());
+  const [status, setStatus] = useState<ConnectionStatus>('conectando');
+  const [rejection, setRejection] = useState<string | null>(null);
+  const [participants, setParticipants] = useState<readonly Participant[]>([]);
+  const providerRef = useRef<HocuspocusProvider | null>(null);
+
+  useEffect(() => {
+    if (room === null || me === null) return;
+
+    setStatus(navigator.onLine ? 'conectando' : 'desconectado');
+    setRejection(null);
+    setParticipants([]);
+
+    const token = currentAccessToken();
+    if (token === null) {
+      setStatus('rechazado');
+      setRejection('No hay sesion.');
+      return;
+    }
+
+    const provider = new HocuspocusProvider({
+      // Un solo origen: el proxy enruta `/collab` al proceso de colaboracion.
+      url: `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/collab`,
+      name: room,
+      // El proveedor vuelve a pedir el valor en cada reconexion. Una cadena
+      // fija quedaria obsoleta si mientras tanto la API renueva la sesion.
+      token: () => currentAccessToken() ?? '',
+      document: doc,
+    });
+    providerRef.current = provider;
+
+    let disposed = false;
+    let lastPermissionWasWrite = writeAllowed.current;
+    const permissions = (readOnly: boolean): void => {
+      if (disposed) return;
+      const lostWriteAccess = lastPermissionWasWrite && readOnly;
+      lastPermissionWasWrite = !readOnly;
+      writeAllowed.current = !readOnly;
+      setCanWrite(!readOnly);
+      if (lostWriteAccess) {
+        setAccessNotice(
+          'Tu permiso cambió a solo lectura. Se recargó la pizarra desde el servidor; los cambios locales no aceptados no se guardaron.',
+        );
+        setStatus('conectando');
+        provider.disconnect();
+        // Mezclar el estado remoto con este Y.Doc volvería a introducir las
+        // operaciones rechazadas. Una réplica limpia elimina los cambios fantasma.
+        setState(emptyBoardState());
+        setDoc(new Y.Doc());
+      }
+    };
+    provider.on('authenticated', ({ scope }: { scope: string }) =>
+      permissions(scope !== 'read-write'),
+    );
+    provider.on('stateless', ({ payload }: { payload: string }) => {
+      try {
+        const message: unknown = JSON.parse(payload);
+        if (
+          typeof message === 'object' &&
+          message !== null &&
+          'type' in message &&
+          message.type === 'access-changed' &&
+          'readOnly' in message &&
+          typeof message.readOnly === 'boolean'
+        ) {
+          permissions(message.readOnly);
+        }
+      } catch {
+        /* Otros mensajes stateless no cambian permisos. */
+      }
+    });
+    // También detecta cambios cuando todos los participantes están inactivos.
+    const checkAccess = (): void => {
+      if (provider.isAuthenticated) provider.sendStateless('check-access');
+    };
+    const accessTimer = window.setInterval(checkAccess, 5000);
+    window.addEventListener('focus', checkAccess);
+
+    let accesoRechazado = false;
+    provider.on('synced', () => {
+      accesoRechazado = false;
+      setStatus('conectado');
+    });
+    provider.on('disconnect', () =>
+      setStatus((previo) => (previo === 'rechazado' ? previo : 'desconectado')),
+    );
+    let renovandoToken = false;
+    const rejectAccess = ({ reason }: { reason: string }): void => {
+      if (disposed) return;
+      writeAllowed.current = false;
+      setCanWrite(false);
+      provider.disconnect();
+      if (reason === 'token-invalido' && !renovandoToken) {
+        renovandoToken = true;
+        void refreshSession().then((renovado) => {
+          if (disposed) return;
+          renovandoToken = false;
+          if (renovado) {
+            accesoRechazado = false;
+            setStatus('conectando');
+            setRejection(null);
+            provider.connect();
+            return;
+          }
+          accesoRechazado = true;
+          writeAllowed.current = false;
+          setCanWrite(false);
+          setStatus('rechazado');
+          setRejection('La sesión expiró. Inicia sesión nuevamente.');
+        });
+        return;
+      }
+
+      accesoRechazado = true;
+      writeAllowed.current = false;
+      setCanWrite(false);
+      setStatus('rechazado');
+      setRejection(reason);
+      provider.disconnect();
+    };
+    provider.on('authenticationFailed', rejectAccess);
+    // Hocuspocus puede cerrar solo la sala manteniendo abierto el WebSocket.
+    // Ese cierre emite `close`, no `authenticationFailed` ni `disconnect`.
+    provider.on('close', ({ event }: { event: { reason?: string } }) => {
+      if (event.reason === 'sin-acceso-a-la-pizarra' || event.reason === 'token-invalido') {
+        rejectAccess({ reason: event.reason });
+      }
+    });
+
+    provider.setAwarenessField('user', {
+      displayName: me.displayName,
+      color: colorPara(provider.document.clientID),
+    });
+
+    const leerPresencia = (): void => {
+      const estados = provider.awareness?.getStates() ?? new Map<number, unknown>();
+      const lista: Participant[] = [];
+
+      for (const [clientId, valor] of estados) {
+        const usuario = (valor as { user?: { displayName?: string; color?: string } }).user;
+        if (usuario?.displayName === undefined) continue;
+
+        lista.push({
+          clientId,
+          displayName: usuario.displayName,
+          color: usuario.color ?? colorPara(clientId),
+          editing: (valor as { editing?: string | null }).editing ?? null,
+        });
+      }
+
+      lista.sort((izq, der) => izq.clientId - der.clientId);
+
+      // Solo se actualiza si de verdad cambio. La presencia se emite en cada
+      // latido, y un array nuevo en cada uno provocaria un render por latido.
+      setParticipants((previo) => (mismaPresencia(previo, lista) ? previo : lista));
+    };
+
+    provider.on('awarenessUpdate', leerPresencia);
+    provider.on('awarenessChange', leerPresencia);
+
+    // `disconnect` puede tardar hasta que el socket detecta que la red murio.
+    // El navegador ya conoce ese estado y debe reflejarse de inmediato: dejar
+    // «En vivo» mientras se trabaja sin conexion hace creer que los demas ya
+    // recibieron cambios que todavia solo existen en esta replica.
+    const alQuedarSinRed = (): void => {
+      setStatus((previo) => (previo === 'rechazado' ? previo : 'desconectado'));
+      provider.disconnect();
+    };
+    const alVolverLaRed = (): void => {
+      if (accesoRechazado) return;
+      setStatus('conectando');
+      provider.connect();
+    };
+    window.addEventListener('offline', alQuedarSinRed);
+    window.addEventListener('online', alVolverLaRed);
+
+    if (!navigator.onLine) provider.disconnect();
+
+    const alActualizar = (): void => setState(readBoardState(doc));
+    doc.on('update', alActualizar);
+    alActualizar();
+    leerPresencia();
+
+    return () => {
+      disposed = true;
+      window.clearInterval(accessTimer);
+      window.removeEventListener('focus', checkAccess);
+      doc.off('update', alActualizar);
+      window.removeEventListener('offline', alQuedarSinRed);
+      window.removeEventListener('online', alVolverLaRed);
+      provider.destroy();
+      providerRef.current = null;
+    };
+  }, [doc, room, me]);
+
+  // La validacion se recalcula solo cuando cambia el modelo. El layout cambia en
+  // cada arrastre y no afecta a la validez.
+  const issues = useMemo(() => validateModel(state.semantic), [state.semantic]);
+
+  const dispatch = useMemo(
+    () =>
+      (
+        batch: CommandBatch,
+        expected?: SemanticModel,
+        scope: 'AFFECTED' | 'MODEL' = 'AFFECTED',
+      ): readonly ValidationIssue[] | null => {
+        if (!writeAllowed.current)
+          return [
+            {
+              code: 'WRITE_ACCESS_DENIED',
+              severity: 'ERROR',
+              elementIds: [],
+              message: 'Ya no tienes permiso para editar esta pizarra.',
+            },
+          ];
+        if (expected !== undefined) {
+          const conflicts = validateProposalPreconditions(
+            batch,
+            expected,
+            readBoardState(doc).semantic,
+            scope,
+          );
+          if (conflicts.length > 0) return conflicts;
+        }
+
+        const batchAplicado = conPosiciones(doc, batch);
+        const resultado = applyBatchToDocument(doc, batchAplicado);
+        if (!resultado.applied) return resultado.issues;
+
+        // Se registra despues de aplicar y sin esperar la respuesta: el cambio ya
+        // esta en el documento y en las demas pantallas, asi que un fallo del
+        // registro no puede deshacerlo. Se avisa por consola y se sigue — perder
+        // una linea de auditoria es malo, congelar el editor por ella es peor.
+        if (boardId !== null) {
+          // Se registra el lote materializado, incluida la posicion que esta
+          // capa asigna a clases importadas o propuestas por el asistente. Asi
+          // la auditoria describe exactamente el cambio que recibio Yjs.
+          void api.recordBatch(boardId, batchAplicado).catch((causa: unknown) => {
+            console.warn('No se pudo registrar el lote para auditoria', causa);
+          });
+        }
+
+        // La proyeccion se refresca por el evento `update`, pero se adelanta aqui
+        // para que la interfaz no espere un ciclo de eventos tras cada accion.
+        setState(readBoardState(doc));
+        return null;
+      },
+    [doc, canWrite, boardId],
+  );
+
+  const announceEditing = useMemo(
+    () =>
+      (elementId: string | null): void => {
+        providerRef.current?.setAwarenessField('editing', elementId);
+      },
+    [],
+  );
+
+  // El objeto se memoiza: devolverlo nuevo en cada render haria que cualquier
+  // efecto que dependa de el se dispare siempre, y `announceEditing` provocaria
+  // una actualizacion de presencia por render — un bucle sin fondo.
+  return useMemo(
+    () => ({
+      state,
+      issues,
+      status,
+      rejection,
+      accessNotice,
+      participants,
+      canWrite,
+      dispatch,
+      announceEditing,
+    }),
+    [
+      state,
+      issues,
+      status,
+      rejection,
+      accessNotice,
+      participants,
+      canWrite,
+      dispatch,
+      announceEditing,
+    ],
+  );
+}
+
+function mismaPresencia(izq: readonly Participant[], der: readonly Participant[]): boolean {
+  if (izq.length !== der.length) return false;
+
+  return izq.every((participante, indice) => {
+    const otro = der[indice];
+    return (
+      otro !== undefined &&
+      participante.clientId === otro.clientId &&
+      participante.displayName === otro.displayName &&
+      participante.editing === otro.editing
+    );
+  });
+}
+
+/**
+ * Coloca en rejilla las clases que llegan sin posicion.
+ *
+ * El modelo canonico no lleva posiciones: viven en la capa de disposicion. El
+ * boton «Nueva clase» ya calculaba una, pero el asistente y las importaciones
+ * no, asi que **todo lo que crean caia en (0, 0)**: importar un diagrama de
+ * cinco clases las dejaba una encima de otra, y encima de las que ya estaban.
+ *
+ * Se resuelve aqui, en el unico punto por el que pasan todos los lotes, y no en
+ * cada panel. La posicion viaja dentro del comando, asi que los demas
+ * participantes ven la misma disposicion en lugar de calcular cada uno la suya.
+ */
+function conPosiciones(doc: Y.Doc, batch: CommandBatch): CommandBatch {
+  const nuevas = batch.commands.filter(
+    (comando) => comando.type === 'CREATE_CLASS' && comando.payload.position === undefined,
+  );
+  if (nuevas.length === 0) return batch;
+
+  let ocupadas = readBoardState(doc).semantic.classes.length;
+
+  return {
+    ...batch,
+    commands: batch.commands.map((comando) => {
+      if (comando.type !== 'CREATE_CLASS' || comando.payload.position !== undefined) {
+        return comando;
+      }
+
+      const posicion = {
+        x: 80 + (ocupadas % 4) * 300,
+        y: 80 + Math.floor(ocupadas / 4) * 240,
+      };
+      ocupadas += 1;
+
+      return { ...comando, payload: { ...comando.payload, position: posicion } };
+    }),
+  };
+}

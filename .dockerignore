@@ -1,0 +1,36 @@
+# Lo que no entra en ninguna imagen.
+#
+# Cada exclusion es tamano de contexto que no se manda al demonio y capa que no
+# se invalida: tocar un ADR no deberia reconstruir la API.
+
+# Dependencias y compilacion: se instalan y se compilan dentro de la imagen.
+node_modules
+**/node_modules
+**/dist
+**/dist-types
+**/*.tsbuildinfo
+
+# Herramientas de desarrollo, no del producto.
+.agents
+.claude
+skills-lock.json
+.vscode
+.idea
+
+# Salidas de herramientas.
+reports
+coverage
+test-results
+playwright-report
+
+# Pruebas de extremo a extremo: corren contra el entorno levantado, desde fuera.
+e2e
+
+# Documentacion. `fixtures` no se excluye: `npm ci` necesita el package.json de
+# cada workspace declarado en el lockfile, y sin el la construccion falla.
+docs
+*.md
+
+# Historia y automatizacion.
+.git
+.github

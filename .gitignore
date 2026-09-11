@@ -1,0 +1,51 @@
+# Dependencias
+node_modules/
+.pnp.*
+
+# Compilacion
+dist/
+dist-types/
+*.tsbuildinfo
+
+# Entorno (RNF-08: el real nunca se versiona, el ejemplo si)
+.env
+.env.*
+!.env.example
+infra/.env
+
+# Salidas de herramientas
+reports/
+coverage/
+.vite/
+playwright-report/
+test-results/
+
+# Prisma
+backend/prisma/generated/
+
+# Artefactos generados por la plataforma
+generated-output/
+*.zip
+
+# Java / Maven (proyectos generados que se compilen localmente)
+target/
+.mvn/wrapper/maven-wrapper.jar
+*.iml
+
+# Editores y sistema
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Herramientas de asistencia: configuracion de la maquina, no del proyecto.
+.agents/
+.claude/
+skills-lock.json
+
+# Documentos de trabajo que no se versionan: el plan maestro y la especificacion
+# de apoyo. La documentacion que si se versiona —ADR, requisitos, arquitectura,
+# despliegue— vive en el resto de `docs/`./
+docs/

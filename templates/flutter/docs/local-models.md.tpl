@@ -1,0 +1,100 @@
+# Modelos de voz y texto intercambiables
+
+La biblioteca del Asistente permite importar varios archivos y elegir dos modelos
+independientes. No descarga pesos automaticamente ni envia audio o instrucciones a
+proveedores IA. Los archivos originales se conservan; la app guarda copias privadas.
+Importar no acredita compatibilidad: el runtime valida el modelo al ejecutar.
+
+| Funcion | Motor | Archivos |
+| --- | --- | --- |
+| Interpretar instrucciones y proponer CRUD | LiteRT-LM | `.litertlm` compatible con runtime 0.15.0 |
+| Alternativa para interpretar instrucciones | llama.cpp mediante llama_flutter_android | `.gguf` de instrucciones |
+| Transcribir voz en español | whisper.cpp mediante whisper_ggml | GGML `.bin` multilingue, tambien cuantizado |
+
+## Seleccion y uso
+
+1. Descarga los modelos que quieras probar y transfiere los archivos al telefono.
+2. En Asistente, pulsa Importar LiteRT-LM, Importar GGUF o Importar Whisper.
+3. Elige el archivo en el selector Android. Importar otro conserva los anteriores.
+4. Selecciona Modelo de texto y Modelo de voz en sus listas. La eleccion persiste.
+5. LiteRT-LM: prueba CPU y GPU segun soporte del equipo. GGUF: elige la plantilla
+   de conversacion indicada por el distribuidor. LiteRT-LM usa la plantilla del modelo.
+6. Whisper: Español (`es`) por defecto; tambien puedes elegir deteccion automatica.
+7. Dicta hasta 45 segundos, pulsa Parar y transcribir, corrige el texto y pulsa
+   Preparar propuesta. Tambien puedes escribir directamente sin modelo de voz.
+8. Revisa el JSON validado. Solo Confirmar escribe en SQLite; la cola envia el
+   cambio cuando el backend vuelve a estar accesible.
+
+El icono de papelera quita la copia privada seleccionada tras confirmacion. No
+borra el archivo original de Descargas. Los archivos pueden ocupar varios GB;
+importar requiere espacio para una copia adicional. Los modelos del catalogo
+permanecen al cambiar de cuenta; los datos del negocio mantienen su aislamiento.
+
+## Punto de partida
+
+Para texto, Gemma 4 E2B IT en `.litertlm` es un candidato si ya funciona en tu
+telefono. No todos los paquetes con la misma extension son compatibles con cada
+version del runtime o acelerador. La version actual usa litertlm 0.0.13, puente
+Flutter de terceros sobre el runtime oficial LiteRT-LM 0.15.0. Mantiene GGUF como
+alternativa; no convierte formatos ni cambia a otra IA silenciosamente.
+
+Para español compara Whisper `base` multilingue con `small` multilingue, por
+ejemplo cuantizaciones Q5_1 compatibles con whisper.cpp. `tiny` sirve para equipos
+con menos recursos. Las variantes `.en` solo son para ingles. La cuantizacion
+reduce almacenamiento/memoria y puede cambiar precision; medir en el telefono.
+Whisper transcribe, no decide que registro borrar ni genera operaciones CRUD.
+
+## Instrucciones internas y memoria
+
+`lib/domain/assistant_prompt.dart` contiene el system prompt compartido por los
+dos motores de texto. Se agrega el recurso seleccionado, campos, restricciones y
+registros filtrados del contrato movil. La salida exige JSON con una accion
+CREATE/UPDATE/DELETE/LIST o una pregunta de aclaracion. No se registran herramientas
+ejecutables en LiteRT-LM; `automaticToolCalling` esta desactivado.
+
+La validacion Dart rechaza campos desconocidos, tipos incorrectos, cambios de
+recurso y claves de edicion/borrado que no aparecen en los registros recibidos.
+El prompt no sustituye esa validacion. Las propuestas siguen requiriendo revision
+humana y el backend vuelve a validar durante sincronizacion.
+
+Whisper recibe `language=es`, `isTranslate=false`, `noContext=true` y un vocabulario
+acotado de la coleccion, no un system prompt de chat. El audio temporal se elimina
+al terminar/cancelar. Su texto nunca ejecuta acciones automaticamente; ruido o
+silencio pueden producir transcripciones equivocadas que hay que corregir.
+
+Los motores de voz y texto se usan secuencialmente. El LLM se carga y libera por
+solicitud; Whisper tampoco queda residente. Reduce RAM simultanea a costa del
+tiempo de carga. La pantalla muestra tiempos: el de texto incluye carga, inferencia
+y liberacion; el de voz empieza al finalizar la grabacion. No equivalen a un
+benchmark puro del modelo. La seleccion persiste sin mantener pesos en RAM.
+
+## Comparacion reproducible sin modificar datos
+
+Usa los mismos registros locales e instrucciones con cada modelo:
+
+- Crear un registro con todos sus campos obligatorios.
+- Pedir una alta incompleta: debe solicitar datos, no inventarlos.
+- Corregir una orden: «No borres a Ana; cambia su nombre a Ana Maria».
+- Pedir editar un nombre repetido: debe preguntar cual.
+- Dictar nombres, fechas, decimales y negaciones con ruido y en silencio.
+- Intentar usar una clave inexistente o agregar un campo desconocido.
+
+Anota modelo, CPU/GPU, tiempo, texto reconocido y validez de la propuesta. Cancela
+la confirmacion para comparar sin escribir. Luego valida en una base de prueba:
+modo avion, cambio confirmado, cierre/reapertura, reconexion y ausencia de duplicados.
+Las pruebas automaticas usan motores simulados; no acreditan calidad de GGUF,
+LiteRT-LM ni Whisper reales. El primer login requiere acceso al backend.
+
+## Limites que siguen abiertos
+
+Esta ampliacion prepara IA local intercambiable. La pasarela a las IA de `infra/.env`
+y Whisper remoto no esta conectada al paquete generado. Flutter sigue usando
+`/mobile-contract`; no interpreta directamente un OpenAPI arbitrario. La cola
+sincroniza con la app abierta/al reabrir; no existe servicio Android permanente.
+
+Fuentes de compatibilidad consultadas:
+
+- [LiteRT-LM oficial](https://github.com/google-ai-edge/LiteRT-LM)
+- [Paquete Flutter litertlm](https://pub.dev/packages/litertlm)
+- [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
+- [Whisper GGML para Flutter](https://pub.dev/packages/whisper_ggml)
