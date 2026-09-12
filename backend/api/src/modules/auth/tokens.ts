@@ -13,6 +13,7 @@ import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 export interface AccessTokenClaims {
   readonly userId: string;
   readonly email: string;
+  readonly sessionVersion?: number;
 }
 
 export interface TokenIssuer {
@@ -35,7 +36,10 @@ export function createTokenIssuer(secret: string, accessTtlSeconds: number): Tok
 
   return {
     async signAccessToken(claims) {
-      return new SignJWT({ email: claims.email } satisfies JWTPayload)
+      return new SignJWT({
+        email: claims.email,
+        sessionVersion: claims.sessionVersion ?? 0,
+      } satisfies JWTPayload)
         .setProtectedHeader({ alg: 'HS256' })
         .setSubject(claims.userId)
         .setIssuer(ISSUER)
@@ -61,11 +65,19 @@ export function createTokenIssuer(secret: string, accessTtlSeconds: number): Tok
 
       const userId = payload.sub;
       const email = payload['email'];
-      if (typeof userId !== 'string' || typeof email !== 'string') {
+      // Los tokens anteriores a la migración pertenecen a la versión inicial.
+      const sessionVersion = payload['sessionVersion'] ?? 0;
+      if (
+        typeof userId !== 'string' ||
+        typeof email !== 'string' ||
+        typeof sessionVersion !== 'number' ||
+        !Number.isSafeInteger(sessionVersion) ||
+        sessionVersion < 0
+      ) {
         throw new InvalidTokenError();
       }
 
-      return { userId, email };
+      return { userId, email, sessionVersion };
     },
   };
 }

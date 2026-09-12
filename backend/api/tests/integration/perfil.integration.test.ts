@@ -157,6 +157,39 @@ describe('perfil y contrasena', () => {
   // -------------------------------------------------------------------------
 
   describe('cambiar la contrasena', () => {
+    it('revoca inmediatamente los JWT anteriores y conserva la renovacion de la cuenta actual', async () => {
+      const account = await api.signUp('revocacion-jwt@example.com', 'contrasena-vieja');
+      const other = await api.request('POST', '/auth/login', {
+        body: { email: 'revocacion-jwt@example.com', password: 'contrasena-vieja' },
+      });
+      const changed = await api.request('POST', '/auth/me/password', {
+        token: account.token,
+        cookie: account.cookie,
+        body: { currentPassword: 'contrasena-vieja', newPassword: 'contrasena-nueva' },
+      });
+      expect(changed.status).toBe(200);
+      expect((await api.request('GET', '/auth/me', { token: other.body.accessToken })).status).toBe(
+        401,
+      );
+      expect(
+        (
+          await api.request('POST', '/projects', {
+            token: other.body.accessToken,
+            body: { displayName: 'Acceso revocado' },
+          })
+        ).status,
+      ).toBe(401);
+      const refresh = await api.request('POST', '/auth/refresh', { cookie: account.cookie });
+      expect(refresh.status).toBe(200);
+      expect(
+        (await api.request('GET', '/auth/me', { token: refresh.body.accessToken })).status,
+      ).toBe(200);
+      const cookie = other.cookies.find((c) => c.name === 'uml_refresh')!;
+      expect(
+        (await api.request('POST', '/auth/refresh', { cookie: `${cookie.name}=${cookie.value}` }))
+          .status,
+      ).toBe(401);
+    });
     it('exige la actual y deja entrar con la nueva', async () => {
       const cuenta = await api.signUp('cambio-ok@example.com', 'contrasena-vieja');
 
@@ -216,6 +249,21 @@ describe('perfil y contrasena', () => {
   // -------------------------------------------------------------------------
 
   describe('recuperar la contrasena', () => {
+    it('restablecer invalida el acceso JWT sin esperar su caducidad', async () => {
+      const account = await api.signUp('reset-jwt@example.com');
+      const token = await sembrarEnlace(account.userId);
+      expect(
+        (
+          await api.request('POST', '/auth/password/reset', {
+            body: { token, newPassword: 'otra-contrasena-segura' },
+          })
+        ).status,
+      ).toBe(200);
+      expect((await api.request('GET', '/auth/me', { token: account.token })).status).toBe(401);
+      expect((await api.request('POST', '/auth/refresh', { cookie: account.cookie })).status).toBe(
+        401,
+      );
+    });
     /**
      * Siembra un enlace valido con un testigo conocido.
      *

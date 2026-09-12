@@ -132,6 +132,7 @@ class LocalModelSettings extends StatelessWidget {
       const SizedBox(height: 12),
       if (library.text?.runtime == ModelRuntime.litertlm)
         DropdownButtonFormField<String>(
+          key: ValueKey('backend-${library.textId}'),
           initialValue: library.backend,
           decoration: const InputDecoration(
             labelText: 'Procesamiento LiteRT-LM',
@@ -153,6 +154,7 @@ class LocalModelSettings extends StatelessWidget {
         ),
       if (library.text?.runtime == ModelRuntime.gguf)
         DropdownButtonFormField<String>(
+          key: ValueKey('template-${library.textId}'),
           initialValue: library.template,
           decoration: const InputDecoration(
             labelText: 'Plantilla de conversacion GGUF',
@@ -169,6 +171,7 @@ class LocalModelSettings extends StatelessWidget {
         ),
       const SizedBox(height: 12),
       DropdownButtonFormField<String>(
+        key: ValueKey('language-${library.speechId}'),
         initialValue: library.language,
         decoration: const InputDecoration(labelText: 'Idioma de Whisper'),
         items: const [

@@ -216,16 +216,22 @@ export function buildCollabServer(config: Config): CollabServer {
                 where: {
                   userId: { in: connections.map((connection) => connection.context.userId) },
                 },
-                select: { userId: true, role: true },
+                select: { userId: true, role: true, user: { select: { sessionVersion: true } } },
               },
             },
           },
         },
       });
       const roles = new Map(board?.project.members.map((member) => [member.userId, member.role]));
+      const versions = new Map(
+        board?.project.members.map((member) => [member.userId, member.user.sessionVersion]),
+      );
       for (const connection of connections) {
         const role = roles.get(connection.context.userId);
-        const expired = connection.context.expiresAt <= Date.now();
+        const expired =
+          connection.context.expiresAt <= Date.now() ||
+          (role !== undefined &&
+            versions.get(connection.context.userId) !== connection.context.sessionVersion);
         if (expired || role === undefined || board?.projectId !== connection.context.projectId) {
           connection.close({
             code: expired ? 4401 : 4403,
@@ -245,6 +251,7 @@ export function buildCollabServer(config: Config): CollabServer {
       // mensajes recibidos siguen siendo validos y deben alcanzar la persistencia.
       if (
         data.context.expiresAt <= Date.now() ||
+        versions.get(data.context.userId) !== data.context.sessionVersion ||
         !roles.has(data.context.userId) ||
         board?.projectId !== data.context.projectId
       ) {
@@ -298,16 +305,51 @@ export function buildCollabServer(config: Config): CollabServer {
     },
   });
 
+  let revocationTimer: ReturnType<typeof setInterval> | undefined;
+  let revocationCheck: Promise<void> | undefined;
+  async function closeRevokedSessions(): Promise<void> {
+    const connections = [...server.hocuspocus.documents.values()].flatMap(
+      (document) => document.getConnections() as Connection<CollaborationContext>[],
+    );
+    if (connections.length === 0) return;
+    const users = await prisma.user.findMany({
+      where: { id: { in: [...new Set(connections.map((c) => c.context.userId))] } },
+      select: { id: true, sessionVersion: true },
+    });
+    const versions = new Map(users.map((user) => [user.id, user.sessionVersion]));
+    for (const connection of connections) {
+      if (
+        connection.context.expiresAt <= Date.now() ||
+        versions.get(connection.context.userId) !== connection.context.sessionVersion
+      ) {
+        connection.close({ code: 4401, reason: 'token-invalido' });
+      }
+    }
+  }
+
   return {
     server,
     prisma,
     async listen() {
       await server.listen();
+      // También cierra clientes inactivos que no envían el latido del navegador.
+      revocationTimer = setInterval(() => {
+        revocationCheck ??= closeRevokedSessions()
+          .catch((error: unknown) =>
+            console.warn('No se pudo comprobar la revocación de sesiones', error),
+          )
+          .finally(() => {
+            revocationCheck = undefined;
+          });
+      }, 5000);
+      revocationTimer.unref();
     },
     port() {
       return server.address.port;
     },
     async close() {
+      clearInterval(revocationTimer);
+      await revocationCheck;
       await server.destroy();
       await prisma.$disconnect();
     },

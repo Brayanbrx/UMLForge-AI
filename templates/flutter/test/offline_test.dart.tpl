@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,6 +14,7 @@ class FakeApi implements RemoteApi {
   int writes = 0;
   final receipts = <String, Map<String, dynamic>>{};
   final rows = <String, Map<String, dynamic>>{};
+  Completer<void>? reading, releaseRead;
   @override
   Future<dynamic> request(
     String method,
@@ -40,6 +42,8 @@ class FakeApi implements RemoteApi {
       return result;
     }
     if (path == '/api/clientes') return rows.values.toList();
+    reading?.complete();
+    await releaseRead?.future;
     final record = rows[path.split('/').last];
     if (record == null) throw ApiFailure(404, 'No existe');
     return record;
@@ -86,6 +90,43 @@ void main() {
   tearDown(() async {
     await store.close();
   });
+  test(
+    'resolver conflicto excluye sincronizacion, ediciones y otra resolucion',
+    () async {
+      api.offline = false;
+      api.rows['a'] = {'id': 'a', 'nombre': 'Ana'};
+      await repo.synchronize();
+      await repo.save(schema.resources.first, {
+        'id': 'a',
+        'nombre': 'Local',
+      }, create: false);
+      api.conflict = true;
+      await expectLater(repo.synchronize(), throwsA(isA<ApiFailure>()));
+      final operation = (await store.queue()).single['operation_id'] as String;
+      api.reading = Completer<void>();
+      api.releaseRead = Completer<void>();
+      final resolving = repo.acceptServer(operation);
+      await api.reading!.future;
+      await expectLater(repo.acceptServer(operation), throwsStateError);
+      await expectLater(
+        repo.save(schema.resources.first, {
+          'id': 'b',
+          'nombre': 'Otra',
+        }, create: true),
+        throwsStateError,
+      );
+      await repo.synchronize();
+      api.releaseRead!.complete();
+      await resolving;
+      expect(await store.queue(), isEmpty);
+      expect((await store.rows('clientes')).single['nombre'], 'Ana');
+      await repo.save(schema.resources.first, {
+        'id': 'a',
+        'nombre': 'Posterior',
+      }, create: false);
+      expect((await store.rows('clientes')).single['nombre'], 'Posterior');
+    },
+  );
   test(
     'ediciones offline se consolidan antes del primer envio y alta borrada no llega al servidor',
     () async {

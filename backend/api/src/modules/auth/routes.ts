@@ -45,22 +45,49 @@ export async function authRoutes(app: FastifyInstance, options: { config: Config
   /** Emite el par de tokens y deja el de refresco en la cookie. */
   async function issueSession(
     reply: FastifyReply,
-    user: { id: string; email: string; displayName: string },
+    user: { id: string; email: string; displayName: string; sessionVersion: number },
+    consumedRefreshId?: string,
   ): Promise<{ accessToken: string; user: { id: string; email: string; displayName: string } }> {
     const refresh = createRefreshToken();
 
-    await app.prisma.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: refresh.hash,
-        expiresAt: new Date(Date.now() + config.REFRESH_TOKEN_TTL_SECONDS * 1000),
-      },
+    await app.prisma.$transaction(async (tx) => {
+      // Serializa emisión y cambio de contraseña sobre la misma fila. Un login
+      // o refresh iniciado antes de la revocación no puede crear otra sesión después.
+      const current = await tx.user.updateMany({
+        where: { id: user.id, sessionVersion: user.sessionVersion },
+        data: { sessionVersion: user.sessionVersion },
+      });
+      if (current.count !== 1) throw unauthorized('La sesión fue revocada.');
+      if (consumedRefreshId !== undefined) {
+        const now = new Date();
+        const consumed = await tx.refreshToken.updateMany({
+          where: {
+            id: consumedRefreshId,
+            userId: user.id,
+            revokedAt: null,
+            expiresAt: { gt: now },
+          },
+          data: { revokedAt: now },
+        });
+        if (consumed.count !== 1) throw unauthorized('La sesión expiró.');
+      }
+      await tx.refreshToken.create({
+        data: {
+          userId: user.id,
+          tokenHash: refresh.hash,
+          expiresAt: new Date(Date.now() + config.REFRESH_TOKEN_TTL_SECONDS * 1000),
+        },
+      });
     });
 
     reply.setCookie(REFRESH_COOKIE, refresh.token, cookieOptions);
 
     return {
-      accessToken: await app.tokens.signAccessToken({ userId: user.id, email: user.email }),
+      accessToken: await app.tokens.signAccessToken({
+        userId: user.id,
+        email: user.email,
+        sessionVersion: user.sessionVersion,
+      }),
       user: { id: user.id, email: user.email, displayName: user.displayName },
     };
   }
@@ -74,7 +101,7 @@ export async function authRoutes(app: FastifyInstance, options: { config: Config
       throw conflict('email_taken', 'Ya existe una cuenta con ese correo.');
     }
 
-    let user: { id: string; email: string; displayName: string };
+    let user: { id: string; email: string; displayName: string; sessionVersion: number };
     try {
       user = await app.prisma.user.create({
         data: {
@@ -140,21 +167,7 @@ export async function authRoutes(app: FastifyInstance, options: { config: Config
       throw unauthorized('La sesion expiro. Inicia sesion de nuevo.');
     }
 
-    // La comprobacion y el consumo tienen que ser una sola escritura
-    // condicional. Dos peticiones simultaneas pueden leer el mismo token antes
-    // de que cualquiera lo revoque; con un `update` incondicional las dos
-    // obtendrian una sesion nueva y la rotacion no impediria la reutilizacion.
-    const consumedAt = new Date();
-    const consumed = await app.prisma.refreshToken.updateMany({
-      where: { id: stored.id, revokedAt: null, expiresAt: { gt: consumedAt } },
-      data: { revokedAt: consumedAt },
-    });
-
-    if (consumed.count !== 1) {
-      throw unauthorized('La sesion expiro. Inicia sesion de nuevo.');
-    }
-
-    return issueSession(reply, stored.user);
+    return issueSession(reply, stored.user, stored.id);
   });
 
   app.post('/auth/logout', async (request, reply) => {

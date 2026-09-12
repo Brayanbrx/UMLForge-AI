@@ -19,6 +19,7 @@ class Repository {
     Map<String, dynamic>? expected,
   }) async {
     resource.validate(dto);
+    dto = resource.normalize(dto);
     await _enqueue(
       resource,
       dto[resource.primaryKey],
@@ -42,7 +43,18 @@ class Repository {
   ) async {
     if (_syncing) throw StateError('Espera a que termine la sincronizacion');
     await local.db.transaction((tx) async {
-      final args = [resource.resource, id.toString()];
+      final canonicalId = resource.key.identity(id);
+      // Older queues may contain uppercase UUIDs. Preserve attempted requests
+      // byte-for-byte until their receipt is acknowledged.
+      final matches = await tx.query(
+        'records',
+        where: resource.key.javaType == 'UUID'
+            ? 'resource=? AND lower(id)=?'
+            : 'resource=? AND id=?',
+        whereArgs: [resource.resource, canonicalId],
+      );
+      final storedId = matches.isEmpty ? canonicalId : matches.first['id'];
+      final args = [resource.resource, storedId];
       final pending = await tx.query(
         'outbox',
         where: 'resource=? AND id=?',
@@ -66,9 +78,11 @@ class Repository {
       if (expected != null &&
           (old.isEmpty ||
               !mapEquals(
-                expected,
-                Map<String, dynamic>.from(
-                  jsonDecode(old.first['payload'] as String),
+                resource.normalize(expected),
+                resource.normalize(
+                  Map<String, dynamic>.from(
+                    jsonDecode(old.first['payload'] as String),
+                  ),
                 ),
               )))
         throw StateError(
@@ -117,14 +131,14 @@ class Repository {
       await tx.insert('outbox', {
         'operation_id': const Uuid().v4(),
         'resource': resource.resource,
-        'id': id.toString(),
+        'id': storedId,
         'method': method,
         'payload': dto == null ? null : jsonEncode(dto),
         'base': base,
       });
       await tx.insert('records', {
         'resource': resource.resource,
-        'id': id.toString(),
+        'id': storedId,
         'payload': jsonEncode(
           dto ?? jsonDecode(old.first['payload'] as String),
         ),
@@ -146,7 +160,10 @@ class Repository {
           'operationId': entry['operation_id'],
           'resource': entry['resource'],
           'method': entry['method'],
-          'id': resource.key.parse(entry['id'] as String),
+          // Do not normalize the request ID of an already attempted operation.
+          'id': resource.key.javaType == 'UUID'
+              ? entry['id']
+              : resource.key.parse(entry['id'] as String),
           'data': entry['payload'] == null
               ? null
               : jsonDecode(entry['payload'] as String),
@@ -187,19 +204,24 @@ class Repository {
               whereArgs: args,
             );
           } else {
-            final dto = Map<String, dynamic>.from(response['data']);
-            if (dto[resource.primaryKey].toString() != entry['id'])
+            final dto = resource.normalize(
+              Map<String, dynamic>.from(response['data']),
+            );
+            final canonicalId = resource.key.identity(entry['id']);
+            if (resource.key.identity(dto[resource.primaryKey]) != canonicalId)
               throw StateError('Identificador remoto inesperado');
-            await tx.update(
+            await tx.delete(
               'records',
-              {
-                'payload': jsonEncode(dto),
-                'server_payload': jsonEncode(dto),
-                'deleted': 0,
-              },
               where: 'resource=? AND id=?',
               whereArgs: args,
             );
+            await tx.insert('records', {
+              'resource': resource.resource,
+              'id': canonicalId,
+              'payload': jsonEncode(dto),
+              'server_payload': jsonEncode(dto),
+              'deleted': 0,
+            }, conflictAlgorithm: ConflictAlgorithm.replace);
           }
           await tx.delete(
             'outbox',
@@ -217,10 +239,10 @@ class Repository {
             columns: ['id'],
             where: 'resource=?',
             whereArgs: [resource.resource],
-          )).map((r) => r['id']).toSet();
+          )).map((r) => resource.key.identity(r['id'])).toSet();
           final ids = <String>{};
           for (final row in result) {
-            final dto = Map<String, dynamic>.from(row);
+            final dto = resource.normalize(Map<String, dynamic>.from(row));
             final id = dto[resource.primaryKey];
             if (id == null) throw StateError('Registro sin clave');
             ids.add(id.toString());
@@ -238,7 +260,8 @@ class Repository {
             where: 'resource=?',
             whereArgs: [resource.resource],
           )) {
-            if (!ids.contains(row['id']) && !pending.contains(row['id']))
+            if (!ids.contains(resource.key.identity(row['id'])) &&
+                !pending.contains(resource.key.identity(row['id'])))
               await tx.delete(
                 'records',
                 where: 'resource=? AND id=?',
@@ -255,6 +278,15 @@ class Repository {
   /// Only definitive conflicts may be discarded; a network timeout is not proof of failure.
   Future<void> acceptServer(String operationId) async {
     if (_syncing) throw StateError('Espera a que termine la sincronizacion');
+    _syncing = true;
+    try {
+      await _acceptServer(operationId);
+    } finally {
+      _syncing = false;
+    }
+  }
+
+  Future<void> _acceptServer(String operationId) async {
     final matches = await local.db.query(
       'outbox',
       where: 'operation_id=? AND status=?',
@@ -273,6 +305,15 @@ class Repository {
     } on ApiFailure catch (error) {
       if (error.status != 404) rethrow;
     }
+    if (dto != null) {
+      if (dto is! Map ||
+          resource.key.identity(dto[resource.primaryKey]) !=
+              resource.key.identity(entry['id'])) {
+        throw StateError('Identificador remoto inesperado');
+      }
+      resource.validate(Map<String, dynamic>.from(dto));
+      dto = resource.normalize(Map<String, dynamic>.from(dto));
+    }
     await local.db.transaction((tx) async {
       if (dto == null) {
         await tx.delete(
@@ -281,16 +322,18 @@ class Repository {
           whereArgs: [entry['resource'], entry['id']],
         );
       } else {
-        await tx.update(
+        await tx.delete(
           'records',
-          {
-            'payload': jsonEncode(dto),
-            'server_payload': jsonEncode(dto),
-            'deleted': 0,
-          },
           where: 'resource=? AND id=?',
           whereArgs: [entry['resource'], entry['id']],
         );
+        await tx.insert('records', {
+          'resource': resource.resource,
+          'id': resource.key.identity(entry['id']),
+          'payload': jsonEncode(dto),
+          'server_payload': jsonEncode(dto),
+          'deleted': 0,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
       await tx.delete(
         'outbox',

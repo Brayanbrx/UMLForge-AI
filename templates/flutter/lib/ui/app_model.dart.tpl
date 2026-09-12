@@ -15,10 +15,14 @@ class AppModel extends ChangeNotifier {
   List<Map<String, Object?>> queue = [];
   String message = '';
   bool busy = false;
+  Object? _syncRun;
+  bool _disposed = false;
   Timer? timer;
   Session? get session => api.session;
   AppModel(this.schema, this.api, this.sessions)
-    : selected = schema.resources.first { api.sessions=sessions; }
+    : selected = schema.resources.first {
+    api.sessions = sessions;
+  }
   Future<void> restore() async {
     unawaited(api.flushLogouts());
     final session = await sessions.restore();
@@ -44,6 +48,7 @@ class AppModel extends ChangeNotifier {
         ? '__SCHEMA_HASH__'
         : nextSchema.fingerprint;
     timer?.cancel();
+    _syncRun = null;
     await repository?.local.close();
     api.session = session;
     schema = nextSchema;
@@ -64,7 +69,10 @@ class AppModel extends ChangeNotifier {
   Future<void> logout() async {
     if (busy) throw StateError('Espera a que termine la operacion');
     timer?.cancel();
-    if(session!=null) await sessions.queueLogout(session!);
+    _syncRun = null;
+    if (session != null) await sessions.queueLogout(session!);
+    // Invalidate in-flight requests before awaiting secure-storage deletion.
+    api.session = null;
     await sessions.clear();
     await repository?.local.close();
     repository = null;
@@ -77,9 +85,16 @@ class AppModel extends ChangeNotifier {
 
   Future<void> refreshLocal() async {
     final repo = repository;
-    if (repo == null) return;
-    rows = await repo.local.rows(selected.resource);
-    queue = await repo.local.queue();
+    if (repo == null || _disposed) return;
+    final resource = selected;
+    final nextRows = await repo.local.rows(resource.resource);
+    final nextQueue = await repo.local.queue();
+    if (_disposed ||
+        !identical(repository, repo) ||
+        !identical(selected, resource))
+      return;
+    rows = nextRows;
+    queue = nextQueue;
     notifyListeners();
   }
 
@@ -89,22 +104,53 @@ class AppModel extends ChangeNotifier {
   }
 
   Future<void> sync() async {
-    if (busy || repository == null) return;
+    final repo = repository;
+    if (busy || _syncRun != null || repo == null || _disposed) return;
+    final run = Object();
+    _syncRun = run;
+    var locked = false;
+    bool current() =>
+        !_disposed && identical(repository, repo) && identical(_syncRun, run);
+    try {
+      // A slow/unreachable server must not prevent local agent/form writes.
+      // Lock editing only after the contract is reachable and the outbox is sent.
+      await api.verifyContract(schema);
+      if (!current() || busy) return;
+      locked = true;
+      busy = true;
+      notifyListeners();
+      await repo.synchronize();
+      if (current()) message = 'Actualizado';
+    } catch (error) {
+      if (current())
+        message = error is ApiFailure
+            ? error.message
+            : error is FormatException
+            ? error.message
+            : 'Sin conexion disponible. Los datos y cambios se conservan en este dispositivo.';
+    } finally {
+      if (current()) {
+        _syncRun = null;
+        if (locked) busy = false;
+        await refreshLocal();
+      }
+    }
+  }
+
+  Future<void> acceptServer(String operationId) async {
+    final repo = repository;
+    if (busy || repo == null || _disposed) {
+      throw StateError('Espera a que termine la operacion');
+    }
     busy = true;
     notifyListeners();
     try {
-      await api.verifyContract(schema);
-      await repository!.synchronize();
-      message = queue.isEmpty ? 'Actualizado' : 'Cambios sincronizados';
-    } catch (error) {
-      message = error is ApiFailure
-          ? error.message
-          : error is FormatException
-          ? error.message
-          : 'Sin conexion disponible. Los datos y cambios se conservan en este dispositivo.';
+      await repo.acceptServer(operationId);
     } finally {
-      busy = false;
-      await refreshLocal();
+      if (!_disposed && identical(repository, repo)) {
+        busy = false;
+        await refreshLocal();
+      }
     }
   }
 
@@ -133,6 +179,8 @@ class AppModel extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
+    _syncRun = null;
     timer?.cancel();
     api.close();
     unawaited(repository?.local.close());

@@ -86,4 +86,45 @@ void main() {
       throwsFormatException,
     );
   });
+  test(
+    'cada LLM y Whisper recupera su propia configuracion al cambiar y reiniciar',
+    () async {
+      final a = await library.importFile(
+        await weights('a.gguf', 'GGUF'),
+        'Gemma',
+        ModelRuntime.gguf,
+      );
+      final b = await library.importFile(
+        await weights('b.gguf', 'GGUF'),
+        'Otro',
+        ModelRuntime.gguf,
+      );
+      final voice = await library.importFile(
+        await weights('voz.bin', 'lmgg'),
+        'Whisper',
+        ModelRuntime.whisper,
+      );
+      await library.select(a);
+      library.template = 'gemma';
+      library.backend = 'gpu';
+      await library.save();
+      await library.select(b);
+      expect(library.template, 'chatml');
+      library.template = 'llama2';
+      await library.save();
+      await library.select(voice);
+      library.language = 'auto';
+      await library.save();
+      await library.select(a);
+      final restored = ModelLibrary(library.directory);
+      await restored.restore();
+      expect(restored.template, 'gemma');
+      expect(restored.backend, 'gpu');
+      expect(restored.language, 'auto');
+      await restored.select(b);
+      expect(restored.template, 'llama2');
+      expect(restored.backend, 'cpu');
+      expect(await restored.file(a).exists(), isTrue);
+    },
+  );
 }

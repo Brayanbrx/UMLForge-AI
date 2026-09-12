@@ -7,10 +7,11 @@ import {
   type ValidationIssue,
 } from '@uml/contracts';
 import { validateModel, validateProposalPreconditions } from '@uml/domain-core';
-import { applyBatchToDocument, readBoardState } from '@uml/yjs-adapter';
+import { readBoardState } from '@uml/yjs-adapter';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Y from 'yjs';
 import { api, currentAccessToken, refreshSession } from '../../lib/api.js';
+import { BoardDrafts } from './board-drafts.js';
 
 /**
  * Enlaza React con el documento colaborativo.
@@ -67,7 +68,7 @@ function colorPara(clientId: number): string {
 
 export function useBoardDocument(
   room: string | null,
-  me: { displayName: string } | null,
+  me: { id: string; displayName: string } | null,
   /**
    * Pizarra a la que atribuir los lotes aplicados (RF-A09).
    *
@@ -87,6 +88,7 @@ export function useBoardDocument(
   const [rejection, setRejection] = useState<string | null>(null);
   const [participants, setParticipants] = useState<readonly Participant[]>([]);
   const providerRef = useRef<HocuspocusProvider | null>(null);
+  const draftsRef = useRef<BoardDrafts | null>(null);
 
   useEffect(() => {
     if (room === null || me === null) return;
@@ -94,6 +96,12 @@ export function useBoardDocument(
     setStatus(navigator.onLine ? 'conectando' : 'desconectado');
     setRejection(null);
     setParticipants([]);
+    try {
+      draftsRef.current = new BoardDrafts(window.localStorage, me.id, room);
+    } catch {
+      draftsRef.current = null;
+      setAccessNotice('El almacenamiento local no está disponible. No se podrán guardar cambios.');
+    }
 
     const token = currentAccessToken();
     if (token === null) {
@@ -114,6 +122,7 @@ export function useBoardDocument(
     providerRef.current = provider;
 
     let disposed = false;
+    let draftsRestored = false;
     let lastPermissionWasWrite = writeAllowed.current;
     const permissions = (readOnly: boolean): void => {
       if (disposed) return;
@@ -123,7 +132,7 @@ export function useBoardDocument(
       setCanWrite(!readOnly);
       if (lostWriteAccess) {
         setAccessNotice(
-          'Tu permiso cambió a solo lectura. Se recargó la pizarra desde el servidor; los cambios locales no aceptados no se guardaron.',
+          'Tu permiso cambió a solo lectura. Se recargó la pizarra desde el servidor; la copia local se conserva y no se enviará sin permiso de edición.',
         );
         setStatus('conectando');
         provider.disconnect();
@@ -162,6 +171,21 @@ export function useBoardDocument(
 
     let accesoRechazado = false;
     provider.on('synced', () => {
+      if (disposed) return;
+      if (!draftsRestored && writeAllowed.current && draftsRef.current !== null) {
+        draftsRestored = true;
+        try {
+          if (draftsRef.current.restore(doc)) {
+            setAccessNotice('Se recuperó la copia local de esta pizarra y se enviará al servidor.');
+          }
+        } catch {
+          writeAllowed.current = false;
+          setCanWrite(false);
+          setAccessNotice(
+            'No se pudo recuperar la copia local. Se conserva intacta; libera espacio o revisa el almacenamiento antes de editar.',
+          );
+        }
+      }
       accesoRechazado = false;
       setStatus('conectado');
     });
@@ -274,6 +298,7 @@ export function useBoardDocument(
       window.removeEventListener('online', alVolverLaRed);
       provider.destroy();
       providerRef.current = null;
+      draftsRef.current = null;
     };
   }, [doc, room, me]);
 
@@ -308,7 +333,21 @@ export function useBoardDocument(
         }
 
         const batchAplicado = conPosiciones(doc, batch);
-        const resultado = applyBatchToDocument(doc, batchAplicado);
+        let resultado;
+        try {
+          if (draftsRef.current === null) throw new Error('Sin almacenamiento local');
+          resultado = draftsRef.current.apply(doc, batchAplicado);
+        } catch {
+          return [
+            {
+              code: 'WRITE_ACCESS_DENIED',
+              severity: 'ERROR',
+              elementIds: [],
+              message:
+                'No se pudo guardar la copia local. El cambio no se aplicó. Libera espacio o habilita el almacenamiento del navegador y reintenta.',
+            },
+          ];
+        }
         if (!resultado.applied) return resultado.issues;
 
         // Se registra despues de aplicar y sin esperar la respuesta: el cambio ya

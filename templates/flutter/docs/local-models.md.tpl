@@ -16,7 +16,8 @@ Importar no acredita compatibilidad: el runtime valida el modelo al ejecutar.
 1. Descarga los modelos que quieras probar y transfiere los archivos al telefono.
 2. En Asistente, pulsa Importar LiteRT-LM, Importar GGUF o Importar Whisper.
 3. Elige el archivo en el selector Android. Importar otro conserva los anteriores.
-4. Selecciona Modelo de texto y Modelo de voz en sus listas. La eleccion persiste.
+4. Selecciona Modelo de texto y Modelo de voz en sus listas. La eleccion persiste;
+   cada archivo conserva sus preferencias de plantilla, CPU/GPU o idioma.
 5. LiteRT-LM: prueba CPU y GPU segun soporte del equipo. GGUF: elige la plantilla
    de conversacion indicada por el distribuidor. LiteRT-LM usa la plantilla del modelo.
 6. Whisper: Español (`es`) por defecto; tambien puedes elegir deteccion automatica.
@@ -84,6 +85,19 @@ la confirmacion para comparar sin escribir. Luego valida en una base de prueba:
 modo avion, cambio confirmado, cierre/reapertura, reconexion y ausencia de duplicados.
 Las pruebas automaticas usan motores simulados; no acreditan calidad de GGUF,
 LiteRT-LM ni Whisper reales. El primer login requiere acceso al backend.
+
+La espera para comprobar si el backend es accesible no bloquea las escrituras
+locales del agente ni los formularios. Una vez iniciado el envio de la cola se
+mantiene el bloqueo temporal existente para proteger operaciones cuya confirmacion
+puede perderse. Los conflictos requieren resolucion y los cambios incompatibles
+del contrato impiden el envio, conservando los datos locales.
+
+La preparacion Android fija NDK 29.0.13113456 y aplica
+`tool/local_models.gradle` para compatibilizar el compileSdk de whisper_ggml con
+su dependencia de audio. Si integras estos archivos en un proyecto Android ya
+existente, el bootstrap lo conserva: configura ese NDK en `android/app/build.gradle.kts`
+y agrega `apply(from = "../tool/local_models.gradle")` al principio de
+`android/build.gradle.kts`. Los proyectos nuevos lo reciben automaticamente.
 
 ## Limites que siguen abiertos
 

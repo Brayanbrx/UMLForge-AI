@@ -155,6 +155,7 @@ class LocalAgent implements AgentPort {
   int lastMilliseconds = 0;
   LocalAgent(this.library, {this.factory = openLocalTextEngine});
   bool get loaded => library.text != null;
+  bool get processing => _active != null;
 
   @override
   Future<Proposal> propose(

@@ -17,11 +17,15 @@ class FieldSpec {
       precision = j['precision'],
       scale = j['scale'];
   bool get numeric => ['Integer', 'Long', 'BigDecimal'].contains(javaType);
+  dynamic normalize(dynamic value) =>
+      javaType == 'UUID' && value is String ? value.toLowerCase() : value;
+  String identity(dynamic value) => normalize(value).toString();
   dynamic parse(String text) {
     if (text.trim().isEmpty) return null;
     return switch (javaType) {
       'Integer' || 'Long' => int.parse(text.trim()),
       'BigDecimal' => num.parse(text.trim()),
+      'UUID' => text.trim().toLowerCase(),
       'Boolean' => switch (text.trim().toLowerCase()) {
         'true' => true,
         'false' => false,
@@ -44,6 +48,12 @@ class ResourceSpec {
       );
   FieldSpec get key => fields.firstWhere((f) => f.name == primaryKey);
   String get resource => path.substring('/api/'.length);
+  Map<String, dynamic> normalize(Map<String, dynamic> value) => {
+    for (final entry in value.entries)
+      entry.key: fields
+          .firstWhere((f) => f.name == entry.key)
+          .normalize(entry.value),
+  };
   void validate(Map<String, dynamic> value) {
     for (final name in value.keys) {
       if (!fields.any((f) => f.name == name))
@@ -81,9 +91,10 @@ class ResourceSpec {
         throw FormatException('${f.name}: usa YYYY-MM-DD');
       if (f.javaType == 'LocalDateTime' &&
           (!RegExp(
-                r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$',
+                r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?$',
               ).hasMatch(v) ||
-              DateTime.tryParse(v) == null))
+              DateTime.tryParse(v)?.toIso8601String().substring(0, 19) !=
+                  v.substring(0, 19)))
         throw FormatException('${f.name}: usa YYYY-MM-DDTHH:mm:ss sin zona');
     }
   }

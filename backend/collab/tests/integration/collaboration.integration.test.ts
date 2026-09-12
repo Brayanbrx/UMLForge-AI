@@ -81,6 +81,37 @@ describe('sesion colaborativa', () => {
   }
 
   /** Espera hasta que la condicion se cumpla, o falla. */
+  it('cierra una conexion inactiva revocada y rechaza reconectar con el JWT anterior', async () => {
+    const separate = await seedProject(collab.prisma, JWT_SECRET);
+    const client = await conectar(separate.room, separate.editorToken);
+    try {
+      let reason: string | undefined;
+      client.provider.on('close', ({ event }: { event: { reason?: string } }) => {
+        reason = event.reason;
+      });
+      await collab.prisma.user.update({
+        where: { id: separate.editorId },
+        data: { sessionVersion: { increment: 1 } },
+      });
+      await esperarA(
+        () => reason === 'token-invalido',
+        'cierre por revocacion sin actividad del cliente',
+      );
+      const { authorizeConnection } = await import('../../src/auth/authorize.js');
+      await expect(
+        authorizeConnection({
+          prisma: collab.prisma,
+          jwtSecret: new TextEncoder().encode(JWT_SECRET),
+          documentName: separate.room,
+          token: separate.editorToken,
+        }),
+      ).rejects.toMatchObject({ reason: 'token-invalido' });
+    } finally {
+      client.provider.destroy();
+      client.doc.destroy();
+    }
+  });
+
   async function esperarA(condicion: () => boolean, motivo: string): Promise<void> {
     const limite = Date.now() + 10_000;
     while (Date.now() < limite) {

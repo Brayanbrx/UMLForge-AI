@@ -42,6 +42,13 @@ export const authPlugin = fp(
       }
 
       const claims = await tokens.verifyAccessToken(header.slice('Bearer '.length));
+      const user = await app.prisma.user.findUnique({
+        where: { id: claims.userId },
+        select: { sessionVersion: true },
+      });
+      if (user === null || user.sessionVersion !== claims.sessionVersion) {
+        throw unauthorized('La sesión fue revocada. Inicia sesión nuevamente.');
+      }
       request.user = claims;
 
       // RNF-14: el actor entra en el registro estructurado de la peticion.

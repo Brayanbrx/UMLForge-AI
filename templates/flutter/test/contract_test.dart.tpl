@@ -31,6 +31,44 @@ Map<String, dynamic> contract(String project, String resource, String key) => {
   ],
 };
 void main() {
+  test('rechaza fechas y horas que Dart normaliza pero Java no acepta', () {
+    final resource = ResourceSpec({
+      'className': 'Evento',
+      'path': '/api/eventos',
+      'primaryKey': 'id',
+      'fields': [
+        {
+          'name': 'id',
+          'javaType': 'String',
+          'nullable': false,
+          'primaryKey': true,
+        },
+        {'name': 'fecha', 'javaType': 'LocalDateTime', 'nullable': false},
+      ],
+    });
+    for (final date in [
+      '2026-02-30T12:00:00',
+      '2026-09-11T25:00:00',
+      '2026-09-11T12:60:00',
+      '2026-09-11T12:00:60',
+      '2026-09-11T12:00:00.1234567890',
+    ]) {
+      expect(
+        () => resource.validate({'id': 'a', 'fecha': date}),
+        throwsFormatException,
+        reason: date,
+      );
+    }
+    for (final date in [
+      '2024-02-29T23:59:59',
+      '2026-09-11T12:00:00.123456789',
+    ]) {
+      expect(
+        () => resource.validate({'id': 'a', 'fecha': date}),
+        returnsNormally,
+      );
+    }
+  });
   test(
     'mismo cliente adopta contratos de negocios diferentes y conserva contrato offline',
     () async {

@@ -397,12 +397,9 @@ class _HomeState extends State<HomeScreen> with WidgetsBindingObserver {
                                               'Se descarta este cambio local rechazado. Los cambios dependientes podrian necesitar correccion.',
                                             )) {
                                               try {
-                                                await m.repository!
-                                                    .acceptServer(
-                                                      q['operation_id']
-                                                          as String,
-                                                    );
-                                                await m.refreshLocal();
+                                                await m.acceptServer(
+                                                  q['operation_id'] as String,
+                                                );
                                               } catch (e) {
                                                 if (context.mounted)
                                                   showError(context, e);
@@ -588,15 +585,8 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused &&
-        (speech?.recording ?? false) &&
-        !busy) {
-      unawaited(
-        run(() async {
-          await speech!.cancel();
-          status = 'Dictado cancelado al salir de la app';
-        }),
-      );
+    if (state == AppLifecycleState.paused && (speech?.capturing ?? false)) {
+      unawaited(cancelDictation());
     }
   }
 
@@ -644,6 +634,15 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
     status =
         'Whisper: ${(speech!.lastMilliseconds / 1000).toStringAsFixed(1)} s. Revisa el texto antes de preparar la propuesta.';
   });
+
+  Future<void> cancelDictation() async {
+    try {
+      await speech?.cancel();
+      if (mounted) setState(() => status = 'Dictado cancelado');
+    } catch (error) {
+      if (mounted) setState(() => status = error.toString());
+    }
+  }
 
   @override
   Widget build(BuildContext context) => ListView(
@@ -801,10 +800,15 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
                   }),
             child: const Text('Preparar propuesta'),
           ),
-          if (busy)
+          if (busy && (agent?.processing ?? false))
             TextButton(
               onPressed: () => agent?.stop(),
               child: const Text('Detener IA'),
+            ),
+          if (busy && (speech?.transcribing ?? false))
+            TextButton(
+              onPressed: cancelDictation,
+              child: const Text('Descartar transcripcion'),
             ),
         ],
       ),

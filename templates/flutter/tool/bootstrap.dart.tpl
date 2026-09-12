@@ -37,7 +37,10 @@ Future<void> main() async {
   final gradle = File('android/app/build.gradle.kts');
   var source = await gradle.readAsString();
   source = source.replaceAll('minSdk = flutter.minSdkVersion', 'minSdk = 26');
-  source = source.replaceAll('ndkVersion = flutter.ndkVersion', 'ndkVersion = "29.0.13113456"');
+  source = source.replaceAll(
+    'ndkVersion = flutter.ndkVersion',
+    'ndkVersion = "29.0.13113456"',
+  );
   source = source.replaceAll(
     'release {',
     'release {\n            isMinifyEnabled = false\n            isShrinkResources = false',
@@ -45,7 +48,8 @@ Future<void> main() async {
   await gradle.writeAsString(source);
   final rootGradle = File('android/build.gradle.kts');
   await rootGradle.writeAsString(
-    'apply(from = "../tool/local_models.gradle")\n' + await rootGradle.readAsString(),
+    'apply(from = "../tool/local_models.gradle")\n' +
+        await rootGradle.readAsString(),
   );
   final manifest = File('android/app/src/main/AndroidManifest.xml');
   var xml = await manifest.readAsString();

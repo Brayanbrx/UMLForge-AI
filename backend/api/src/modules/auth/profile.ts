@@ -200,7 +200,10 @@ export async function profileRoutes(
     await app.prisma.$transaction([
       app.prisma.user.update({
         where: { id: userId },
-        data: { passwordHash: await hashPassword(body.newPassword) },
+        data: {
+          passwordHash: await hashPassword(body.newPassword),
+          sessionVersion: { increment: 1 },
+        },
       }),
       // Las demas sesiones se cierran; la actual sobrevive para no expulsar a
       // quien acaba de cambiarla.
@@ -301,7 +304,10 @@ export async function profileRoutes(
     await app.prisma.$transaction(async (tx) => {
       // El cambio bloquea la fila de usuario y serializa tambien dos enlaces
       // distintos de la misma cuenta. Si el consumo falla, todo se revierte.
-      await tx.user.update({ where: { id: registro.userId }, data: { passwordHash } });
+      await tx.user.update({
+        where: { id: registro.userId },
+        data: { passwordHash, sessionVersion: { increment: 1 } },
+      });
       const consumido = await tx.passwordReset.updateMany({
         where: { id: registro.id, usedAt: null, expiresAt: { gt: new Date() } },
         data: { usedAt: ahora },

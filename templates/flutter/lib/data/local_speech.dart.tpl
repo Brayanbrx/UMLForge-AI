@@ -7,31 +7,66 @@ import '../domain/assistant_prompt.dart';
 import '../domain/schema.dart';
 import 'model_library.dart';
 
+typedef LocalTranscriber =
+    Future<String> Function(TranscribeRequest request, String modelPath);
+Future<String> transcribeWhisperFile(
+  TranscribeRequest request,
+  String modelPath,
+) async {
+  // Explicit modelPath selects the imported file, including quantized variants.
+  final result = await const Whisper(
+    model: WhisperModel.base,
+  ).transcribe(modelPath: modelPath, transcribeRequest: request);
+  return result.text;
+}
+
 /// Explicit local path: no initModel or automatic downloads.
 class LocalSpeech {
   final ModelLibrary library;
-  final AudioRecorder recorder = AudioRecorder();
-  LocalSpeech(this.library);
+  final AudioRecorder recorder;
+  final LocalTranscriber transcribe;
+  final Future<Directory> Function() temporaryDirectory;
+  LocalSpeech(
+    this.library, {
+    AudioRecorder? recorder,
+    this.transcribe = transcribeWhisperFile,
+    this.temporaryDirectory = getTemporaryDirectory,
+  }) : recorder = recorder ?? AudioRecorder();
   bool recording = false;
   bool _closed = false;
   String? _audio;
   Timer? _limit;
+  Completer<void>? _starting;
   Completer<void>? _transcribing;
+  int _generation = 0;
   int lastMilliseconds = 0;
+  bool get capturing => recording || _starting != null;
+  bool get transcribing => _transcribing != null;
   Future<void> start(void Function() onLimit) async {
-    if (_closed || recording) throw StateError('La grabacion ya esta activa');
-    final model = library.speech;
-    if (model == null || !await library.file(model).exists()) {
-      throw StateError(
-        'Importa y selecciona primero un Whisper multilingue .bin',
-      );
+    if (_closed || recording || _starting != null || _transcribing != null)
+      throw StateError('La grabacion ya esta activa');
+    final active = Completer<void>();
+    _starting = active;
+    final generation = _generation;
+    void check() {
+      if (_closed || generation != _generation)
+        throw StateError('Dictado cancelado');
     }
-    if (!await recorder.hasPermission())
-      throw StateError('Se necesita permiso de microfono');
-    final directory = await getTemporaryDirectory();
-    _audio =
-        '${directory.path}/dictation-${DateTime.now().microsecondsSinceEpoch}.wav';
+
     try {
+      final model = library.speech;
+      if (model == null || !await library.file(model).exists()) {
+        throw StateError(
+          'Importa y selecciona primero un Whisper multilingue .bin',
+        );
+      }
+      check();
+      if (!await recorder.hasPermission())
+        throw StateError('Se necesita permiso de microfono');
+      final directory = await temporaryDirectory();
+      check();
+      _audio =
+          '${directory.path}/dictation-${DateTime.now().microsecondsSinceEpoch}.wav';
       await recorder.start(
         const RecordConfig(
           encoder: AudioEncoder.wav,
@@ -41,10 +76,14 @@ class LocalSpeech {
         path: _audio!,
       );
       recording = true;
+      check();
       _limit = Timer(const Duration(seconds: 45), onLimit);
     } catch (_) {
-      await cancel();
+      await _discard();
       rethrow;
+    } finally {
+      _starting = null;
+      active.complete();
     }
   }
 
@@ -52,20 +91,27 @@ class LocalSpeech {
     _limit?.cancel();
     final path = _audio;
     final model = library.speech;
-    if (!recording || path == null || model == null)
+    if (_closed ||
+        _transcribing != null ||
+        !recording ||
+        path == null ||
+        model == null)
       throw StateError('No hay dictado activo');
     final elapsed = Stopwatch()..start();
     final active = Completer<void>();
     _transcribing = active;
+    final generation = _generation;
+    recording = false;
+    var stopped = false;
     try {
       await recorder.stop();
-      recording = false;
+      stopped = true;
+      if (_closed || generation != _generation)
+        throw StateError('Dictado cancelado');
       if (await File(path).length() <= 3200)
         throw StateError('Grabacion demasiado corta');
-      // Explicit modelPath chooses the imported weights; the enum does not download anything.
-      final result = await const Whisper(model: WhisperModel.base).transcribe(
-        modelPath: library.file(model).path,
-        transcribeRequest: TranscribeRequest(
+      final result = await transcribe(
+        TranscribeRequest(
           audio: path,
           language: library.language,
           isTranslate: false,
@@ -75,9 +121,11 @@ class LocalSpeech {
           initialPrompt: transcriptionVocabulary(resource),
           keepModelLoaded: false,
         ),
+        library.file(model).path,
       );
-      if (_closed) throw StateError('Dictado cancelado');
-      final text = result.text.trim();
+      if (_closed || generation != _generation)
+        throw StateError('Dictado cancelado');
+      final text = result.trim();
       if (text.isEmpty)
         throw StateError('No se reconocio texto. Puedes escribirlo.');
       if (text.length > 2000)
@@ -87,6 +135,7 @@ class LocalSpeech {
       recording = false;
       lastMilliseconds = elapsed.elapsedMilliseconds;
       try {
+        if (!stopped) await recorder.cancel();
         for (final p in [path, '$path.wav']) {
           final file = File(p);
           if (await file.exists()) await file.delete();
@@ -100,8 +149,14 @@ class LocalSpeech {
   }
 
   Future<void> cancel() async {
+    _generation++;
     _limit?.cancel();
+    await _starting?.future;
     await _transcribing?.future;
+    await _discard();
+  }
+
+  Future<void> _discard() async {
     if (recording) {
       await recorder.cancel();
       recording = false;

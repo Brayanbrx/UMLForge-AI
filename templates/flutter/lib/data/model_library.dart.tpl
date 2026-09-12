@@ -43,7 +43,28 @@ class ModelLibrary {
   final Directory directory;
   final List<LocalModelFile> models = [];
   String? textId, speechId;
-  String backend = 'cpu', template = 'chatml', language = 'es';
+  final Map<String, Map<String, String>> _settings = {};
+  String get backend => _settings[textId]?['backend'] ?? 'cpu';
+  set backend(String value) {
+    if (!['cpu', 'gpu'].contains(value))
+      throw const FormatException('Backend local invalido');
+    if (textId != null) (_settings[textId!] ??= {})['backend'] = value;
+  }
+
+  String get template => _settings[textId]?['template'] ?? 'chatml';
+  set template(String value) {
+    if (!templates.contains(value))
+      throw const FormatException('Plantilla invalida');
+    if (textId != null) (_settings[textId!] ??= {})['template'] = value;
+  }
+
+  String get language => _settings[speechId]?['language'] ?? 'es';
+  set language(String value) {
+    if (!['es', 'auto'].contains(value))
+      throw const FormatException('Idioma invalido');
+    if (speechId != null) (_settings[speechId!] ??= {})['language'] = value;
+  }
+
   static const templates = [
     'chatml',
     'llama2',
@@ -100,9 +121,27 @@ class ModelLibrary {
       ..addAll((j['models'] as List).map((m) => LocalModelFile.fromJson(m)));
     textId = j['textId'];
     speechId = j['speechId'];
-    backend = ['cpu', 'gpu'].contains(j['backend']) ? j['backend'] : 'cpu';
-    template = templates.contains(j['template']) ? j['template'] : 'chatml';
-    language = ['es', 'auto'].contains(j['language']) ? j['language'] : 'es';
+    _settings.clear();
+    final stored = j['settings'];
+    if (stored is Map) {
+      for (final model in models) {
+        final entry = stored[model.id];
+        if (entry is! Map) continue;
+        _settings[model.id] = {
+          if (['cpu', 'gpu'].contains(entry['backend']))
+            'backend': entry['backend'],
+          if (templates.contains(entry['template']))
+            'template': entry['template'],
+          if (['es', 'auto'].contains(entry['language']))
+            'language': entry['language'],
+        };
+      }
+    } else {
+      // Migrate preferences saved by the first version of the library.
+      backend = ['cpu', 'gpu'].contains(j['backend']) ? j['backend'] : 'cpu';
+      template = templates.contains(j['template']) ? j['template'] : 'chatml';
+      language = ['es', 'auto'].contains(j['language']) ? j['language'] : 'es';
+    }
   }
 
   Future<void> save() async {
@@ -117,6 +156,7 @@ class ModelLibrary {
         'backend': backend,
         'template': template,
         'language': language,
+        'settings': _settings,
       }),
       flush: true,
     );
@@ -159,6 +199,7 @@ class ModelLibrary {
         await save();
       } catch (_) {
         models.remove(model);
+        if (await file(model).exists()) await file(model).delete();
         rethrow;
       }
       return model;
@@ -181,6 +222,7 @@ class ModelLibrary {
 
   Future<void> remove(LocalModelFile model) async {
     models.removeWhere((m) => m.id == model.id);
+    _settings.remove(model.id);
     if (textId == model.id) textId = null;
     if (speechId == model.id) speechId = null;
     await save();

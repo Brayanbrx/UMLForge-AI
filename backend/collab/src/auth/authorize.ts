@@ -59,6 +59,7 @@ export interface CollaborationContext {
   readonly boardId: string;
   readonly role: ProjectRole;
   readonly expiresAt: number;
+  readonly sessionVersion: number;
 }
 
 /**
@@ -109,10 +110,29 @@ export async function authorizeConnection(
 
   const userId = payload.sub;
   const email = payload['email'];
-  if (typeof userId !== 'string' || typeof email !== 'string' || typeof payload.exp !== 'number') {
+  const sessionVersion = payload['sessionVersion'] ?? 0;
+  if (
+    typeof userId !== 'string' ||
+    typeof email !== 'string' ||
+    typeof payload.exp !== 'number' ||
+    typeof sessionVersion !== 'number' ||
+    !Number.isSafeInteger(sessionVersion) ||
+    sessionVersion < 0
+  ) {
     throw new UnauthorizedConnection(
       CONNECTION_REJECTIONS.TOKEN_INVALIDO,
       'El token no identifica a un usuario.',
+    );
+  }
+
+  const user = await options.prisma.user.findUnique({
+    where: { id: userId },
+    select: { sessionVersion: true },
+  });
+  if (user === null || user.sessionVersion !== sessionVersion) {
+    throw new UnauthorizedConnection(
+      CONNECTION_REJECTIONS.TOKEN_INVALIDO,
+      'La sesión fue revocada.',
     );
   }
 
@@ -152,6 +172,7 @@ export async function authorizeConnection(
       boardId,
       role: membership.role,
       expiresAt: payload.exp * 1000,
+      sessionVersion,
     },
     // CA-A08.2: el rol de lectura se conecta, ve y no escribe.
     readOnly: !roleCanWrite(membership.role),
