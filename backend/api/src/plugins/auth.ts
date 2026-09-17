@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import type { Config } from '../config.js';
 import { unauthorized } from '../lib/http-error.js';
+import { enforceLimit, isExpensiveRequest } from './security.js';
 import {
   createTokenIssuer,
   type AccessTokenClaims,
@@ -35,7 +36,12 @@ export const authPlugin = fp(
     app.decorate('tokens', tokens);
     app.decorateRequest('user', undefined);
 
-    app.decorate('authenticate', async (request: FastifyRequest) => {
+    const workQuota = app.createRateLimit({
+      max: options.config.WORK_RATE_LIMIT_MAX,
+      timeWindow: 60_000,
+      keyGenerator: (request) => request.user?.userId ?? request.ip,
+    });
+    app.decorate('authenticate', async (request: FastifyRequest, reply) => {
       const header = request.headers.authorization;
       if (header === undefined || !header.startsWith('Bearer ')) {
         throw unauthorized('Falta el token de acceso.');
@@ -50,6 +56,8 @@ export const authPlugin = fp(
         throw unauthorized('La sesión fue revocada. Inicia sesión nuevamente.');
       }
       request.user = claims;
+      if (options.config.RATE_LIMIT_ENABLED && isExpensiveRequest(request))
+        await enforceLimit(workQuota, request, reply);
 
       // RNF-14: el actor entra en el registro estructurado de la peticion.
       //

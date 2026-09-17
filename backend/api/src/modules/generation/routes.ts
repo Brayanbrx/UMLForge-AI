@@ -278,6 +278,50 @@ export async function generationRoutes(
 
     return reply.send(zip);
   });
+
+  /**
+   * Elimina una generacion del historial (limpieza del servidor).
+   *
+   * El ZIP nunca se guardo en disco: lo unico que ocupa espacio es la fila del
+   * manifiesto y la **copia congelada** del snapshot sobre la que se regenera.
+   * Borrar la generacion borra tambien esa copia cuando ya nadie la referencia;
+   * la version 1 —la proyeccion viva que reescribe la colaboracion— no se toca
+   * nunca desde aqui.
+   *
+   * Es una accion de EDITOR, como generar: quien puede producir el entregable
+   * puede retirarlo. Un VIEWER lo descarga, no lo administra.
+   */
+  app.delete('/generations/:generationId', async (request, reply) => {
+    const { generationId } = generationParams.parse(request.params);
+    const { userId } = currentUser(request);
+
+    const generation = await app.prisma.generation.findUnique({
+      where: { id: generationId },
+      select: { boardId: true, snapshotVersion: true, board: { select: { projectId: true } } },
+    });
+    if (generation === null) throw notFound('La generacion no existe.');
+    await requireWriteAccess(app.prisma, generation.board.projectId, userId);
+
+    await app.prisma.$transaction(async (tx) => {
+      await tx.generation.delete({ where: { id: generationId } });
+
+      // Cada generacion congela su propia copia, pero se comprueba igual: si
+      // alguna vez dos compartieran version, borrar una no puede dejar a la
+      // otra sin snapshot y por tanto sin descarga.
+      const referencias = await tx.generation.count({
+        where: { boardId: generation.boardId, snapshotVersion: generation.snapshotVersion },
+      });
+      if (generation.snapshotVersion > 1 && referencias === 0) {
+        await tx.boardSnapshot.delete({
+          where: {
+            boardId_version: { boardId: generation.boardId, version: generation.snapshotVersion },
+          },
+        });
+      }
+    });
+
+    return reply.code(204).send();
+  });
 }
 
 /**

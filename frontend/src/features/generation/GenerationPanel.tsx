@@ -106,6 +106,33 @@ export function GenerationPanel({
     [],
   );
 
+  const eliminar = useCallback(
+    async (generacion: GenerationSummary) => {
+      // El ZIP no existe en el servidor: lo que se borra es el registro y la
+      // version congelada sobre la que se regenera. Eso hace la descarga
+      // imposible para siempre, y por eso se pregunta antes.
+      const confirmado = window.confirm(
+        `¿Eliminar la generación v${generacion.snapshotVersion} de ${generacion.projectName}? ` +
+          'Ya no se podrá descargar.',
+      );
+      if (!confirmado) return;
+
+      setError(null);
+      try {
+        await api.deleteGeneration(generacion.id);
+        if (ultima === generacion.id) {
+          setUltima(null);
+          setUltimoMobile(false);
+        }
+        setEstado(`Eliminada la generación v${generacion.snapshotVersion}.`);
+        refrescar();
+      } catch (causa) {
+        setError(causa instanceof Error ? causa.message : 'No se pudo eliminar.');
+      }
+    },
+    [refrescar, ultima],
+  );
+
   return (
     <section className="generacion" data-testid="panel-generacion">
       <h3>Generación</h3>
@@ -245,18 +272,33 @@ export function GenerationPanel({
                 {generacion.projectName} · {generacion.basePackage}
                 {generacion.status === 'FAILED' && ` · falló: ${generacion.error ?? ''}`}
               </span>
-              {generacion.status === 'READY' && (
+              {(generacion.status === 'READY' || canWrite) && (
                 <span className="acciones-historial">
-                  <button
-                    type="button"
-                    aria-label={`Descargar backend de la versión ${generacion.snapshotVersion}`}
-                    onClick={() => void descargar(generacion.id)}
-                  >
-                    Backend
-                  </button>
-                  {generacion.mobileSha256 && (
+                  {generacion.status === 'READY' && (
+                    <button
+                      type="button"
+                      aria-label={`Descargar backend de la versión ${generacion.snapshotVersion}`}
+                      onClick={() => void descargar(generacion.id)}
+                    >
+                      Backend
+                    </button>
+                  )}
+                  {generacion.status === 'READY' && generacion.mobileSha256 && (
                     <button type="button" onClick={() => void descargar(generacion.id, 'mobile')}>
                       Android + backend
+                    </button>
+                  )}
+                  {/* Una generacion fallida o en curso tambien se puede retirar:
+                      no tiene artefacto, pero sigue ocupando el historial. */}
+                  {canWrite && (
+                    <button
+                      type="button"
+                      className="eliminar"
+                      aria-label={`Eliminar la generación v${generacion.snapshotVersion}`}
+                      data-testid={`eliminar-generacion-${generacion.snapshotVersion}`}
+                      onClick={() => void eliminar(generacion)}
+                    >
+                      Eliminar
                     </button>
                   )}
                 </span>

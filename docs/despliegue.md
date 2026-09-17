@@ -41,6 +41,12 @@ el testigo en la cabecera. Con uno solo el síntoma sería un 404 del proveedor.
 
 ### 1.2 Qué proveedor atiende cada puerto, y a dónde se cae
 
+Cada puerto tiene **un principal, un primer respaldo y hasta seis respaldos
+más**, en orden. Se prueban uno tras otro y la cadena se detiene en el primero
+que responde bien. La lista completa de proveedores, los modelos probados con
+claves reales y los límites de cada plan gratuito están en
+[proveedores-ia.md](proveedores-ia.md); aquí va solo el mapa.
+
 ```text
                          Pasarela de IA
                                │
@@ -49,26 +55,31 @@ el testigo en la cabecera. Con uno solo el síntoma sería un 404 del proveedor.
           LlmPort          VisionPort        SpeechPort
              │                 │                 │
              ▼                 ▼                 ▼
-           gemini            gemini             groq
+           groq             gemini             groq
              │                 │                 │
          no responde       no responde       no responde
              │                 │                 │
              ▼                 ▼                 ▼
-         openrouter        openrouter        cloudflare
+       gemini-lite         mistral         cloudflare
+             │                 │                 │
+             ▼                 ▼                 ▼
+      AI_LLM_FALLBACKS  AI_VISION_FALLBACKS  AI_SPEECH_FALLBACKS
 ```
 
 ```bash
 # Texto: interpreta instrucciones y responde consultas (RF-030 a RF-037)
-AI_LLM_PROVIDER=gemini
-AI_LLM_MODEL=gemini-3.6-flash
-AI_LLM_FALLBACK_PROVIDER=openrouter
-AI_LLM_FALLBACK_MODEL=anthropic/claude-sonnet-4.5
+AI_LLM_PROVIDER=groq
+AI_LLM_MODEL=openai/gpt-oss-120b
+AI_LLM_FALLBACK_PROVIDER=gemini
+AI_LLM_FALLBACK_MODEL=gemini-3.5-flash-lite
+AI_LLM_FALLBACKS=[{"provider":"openrouter","model":"openrouter/free","enabled":true}, …]
 
 # Imagen: lee una foto de un diagrama (RF-040 a RF-043)
 AI_VISION_PROVIDER=gemini
-AI_VISION_MODEL=gemini-3.6-flash
-AI_VISION_FALLBACK_PROVIDER=openrouter
-AI_VISION_FALLBACK_MODEL=anthropic/claude-sonnet-4.5
+AI_VISION_MODEL=gemini-3.5-flash
+AI_VISION_FALLBACK_PROVIDER=mistral
+AI_VISION_FALLBACK_MODEL=ministral-14b-latest
+AI_VISION_FALLBACKS=[{"provider":"cloudflare","model":"@cf/meta/llama-4-scout-17b-16e-instruct","enabled":true}, …]
 
 # Voz: respaldo del reconocimiento del navegador
 AI_SPEECH_PROVIDER=groq
@@ -76,59 +87,71 @@ AI_SPEECH_MODEL=whisper-large-v3-turbo
 AI_SPEECH_FALLBACK_PROVIDER=cloudflare
 ```
 
-**El respaldo es por puerto, y tiene que ser otro proveedor.** Uno global no
-puede existir: el que transcribe audio no es el mismo que interpreta una frase.
-Y un respaldo que pasa por la misma infraestructura que el primario no es un
-respaldo — si Google está caído, dos rutas hacia Google están caídas. Por eso el
-proceso **rechaza** un respaldo idéntico al primario en lugar de aceptarlo y
-dejar creer que hay red de seguridad.
+**El respaldo es por puerto.** Uno global no puede existir: el que transcribe
+audio no es el mismo que interpreta una frase. Y un respaldo idéntico al
+primario —mismo proveedor y mismo modelo— no es un respaldo, así que el proceso
+lo **rechaza** en lugar de aceptarlo y dejar creer que hay red de seguridad. El
+mismo proveedor con otro modelo sí vale: `gemini-3.8-flash` puede respaldar a
+`gemini-3.5-flash-lite`.
 
 | Puerto | Proveedores que lo atienden |
 |---|---|
-| Texto (`AI_LLM_*`) | `mock`, `anthropic`, `gemini`, `openrouter` |
-| Imagen (`AI_VISION_*`) | `mock`, `anthropic`, `gemini`, `openrouter` |
-| Voz (`AI_SPEECH_*`) | `mock`, `groq`, `cloudflare` |
+| Texto (`AI_LLM_*`) | `mock`, `anthropic`, `gemini`, `openrouter`, `groq`, `cloudflare`, `mistral`, `zai`, `nvidia`, `cohere`, `moonshot`, `sambanova` |
+| Imagen (`AI_VISION_*`) | los mismos que texto |
+| Voz (`AI_SPEECH_*`) | `mock`, `groq`, `cloudflare`, `mistral` |
 
-Una combinación imposible —`AI_LLM_PROVIDER=groq`— **no arranca**. Aceptarla y
-caer al simulado en silencio haría creer que se probó un proveedor que nunca fue
-llamado.
+Una combinación imposible —`AI_SPEECH_PROVIDER=gemini`— **no arranca**.
+Aceptarla y caer al simulado en silencio haría creer que se probó un proveedor
+que nunca fue llamado.
 
-`openrouter` exige modelo: enruta a cientos y ninguno es el evidente.
+Todos los proveedores compatibles con OpenAI (`openrouter`, `groq`,
+`cloudflare`, `mistral`, `zai`, `nvidia`, `cohere`, `moonshot`,
+`sambanova`) **exigen modelo** en texto e imagen: cada uno sirve muchos y
+ninguno es el evidente. En voz los adaptadores ya saben a qué Whisper o
+Voxtral llamar.
 
 ### 1.3 Qué se comprueba al arrancar
 
 El proceso falla al construirse, no en la primera llamada. Enterarse de que
-falta una clave con la foto ya cargada es lo peor que puede
-pasar el día de la defensa. Se comprueba que el proveedor atiende ese puerto,
-que su credencial está, que el respaldo no es el primario y que OpenRouter tiene
-modelo.
+falta una clave con la foto ya cargada es lo peor que puede pasar el día de la
+defensa. Se comprueba que el proveedor atiende ese puerto, que su credencial
+está, que el respaldo no es el primario, que los compatibles tienen modelo y
+que no hay más de siete entradas por puerto (contando las desactivadas).
 
-Al arrancar, el registro dice la cadena activa —`texto: gemini/gemini-3.6-flash
-→ openrouter/anthropic/claude-sonnet-4.5 | imagen: … | voz: …`— sin ninguna
-clave. Es lo que evita la conversación de «¿pero esto está usando el simulado?»
-en mitad de una demostración.
+Al arrancar, el registro dice la cadena activa —`texto: groq/openai/gpt-oss-120b
+→ gemini/gemini-3.5-flash-lite → … | imagen: … | voz: …`— sin ninguna clave. Es lo
+que evita la conversación de «¿pero esto está usando el simulado?» en mitad de
+una demostración.
 
 ### 1.4 Tiempos y reintentos
 
 ```bash
-AI_TIMEOUT_MS=15000        # por intento, no por la serie
-AI_VISION_TIMEOUT_MS=      # vacío = el triple del anterior
-AI_MAX_RETRIES=1           # adicionales al primer intento, solo ante 429 y 5xx
-AI_LOG_USAGE=true          # proveedor, modelo, tokens y latencia; nunca la clave
+AI_TIMEOUT_MS=15000              # por intento, no por la serie
+AI_VISION_TIMEOUT_MS=            # vacío = máximo(3 × el anterior, 120000)
+AI_CHAIN_TIMEOUT_MS=120000       # plazo total del puerto de texto, toda la cadena
+AI_VISION_CHAIN_TIMEOUT_MS=300000
+AI_SPEECH_CHAIN_TIMEOUT_MS=120000
+AI_MAX_RETRIES=0                 # reintentos dentro del mismo proveedor ante red/5xx
+AI_QUOTA_COOLDOWN_MS=60000       # cuánto se recuerda un 402/429 antes de reintentar ese proveedor
+AI_LOG_USAGE=true                # proveedor, modelo, tokens y latencia; nunca la clave
 ```
 
-Corto a propósito: lo que salva una llamada durante la defensa es cambiar de
-proveedor pronto, no esperar más al que no contesta. **Peor caso** =
-`AI_TIMEOUT_MS × (AI_MAX_RETRIES + 1) × 2` cuando hay respaldo; con estos
-valores, 60 segundos.
+El plazo por intento es corto a propósito: lo que salva una llamada durante la
+defensa es cambiar de proveedor pronto, no esperar más al que no contesta. Con
+Groq de primario una instrucción responde en uno o dos segundos; el límite
+existe para los respaldos lentos. El **peor caso** lo acota el plazo total de
+la cadena, no la suma de intentos: 120 segundos para texto y voz, 300 para
+imagen. Nginx espera 330; si se sube alguno por encima, hay que subir también
+el proxy.
 
-La visión tiene su propio límite porque leer un pizarrón cuesta más que
-interpretar una frase. Sin él, bajar `AI_TIMEOUT_MS` para que el asistente
-reaccione rápido rompía la importación por foto.
+La visión tiene su propio límite por intento porque leer un pizarrón cuesta
+más que interpretar una frase: medido, entre 9 y 40 segundos según el
+proveedor. Sin él, bajar `AI_TIMEOUT_MS` para que el asistente reaccione
+rápido rompía la importación por foto.
 
 **Una clave inválida no cae al respaldo.** Es configuración, se arregla en un
 minuto, y disimularla cambiando de proveedor significa no enterarse nunca. Solo
-se cae al respaldo cuando el primario *no respondió*
+se cae al respaldo cuando el primario *no respondió* o dijo que no tiene cuota
 ([ADR-015](adr/ADR-015-proveedores-ia-tras-puertos.md)).
 
 ### 1.5 Después de cambiar el archivo
@@ -231,55 +254,77 @@ mirar.
 
 ---
 
-## 4 · En internet
+## 4 · En internet: una máquina virtual en cualquier nube
 
-Nada de esto está hecho todavía. Es la lista de lo que falta, no un instructivo
-probado.
+El instructivo completo y probado está en
+[`infra/DEPLOYMENT.md`](../infra/DEPLOYMENT.md). Aquí va el resumen de qué
+cambia respecto al aula y por qué.
 
-### 4.1 Lo que hay que cambiar en la configuración
+### 4.1 Qué se necesita
+
+- Una VM Linux (Ubuntu 24.04) con Docker. Sirve AWS EC2, Azure, Google Cloud o
+  cualquier VPS; la guía tiene una tabla con los puertos, la IP fija y las copias
+  de cada proveedor. Orientativo: 2 vCPU, 4 GiB de RAM, 30 GiB de disco.
+- Un dominio apuntando a la IP pública. Caddy pide y renueva el certificado
+  solo; sin dominio no hay HTTPS, y sin HTTPS la colaboración no conecta (el
+  navegador exige `wss://` y no lo explica).
+- Un remitente verificado en Brevo para la recuperación de contraseñas.
+- Un bucket S3 compatible para las copias, o `BACKUP_S3_URI=local-only` para
+  empezar sin él.
+
+### 4.2 Qué cambia respecto a la configuración local
 
 | Variable | Local | En internet | Por qué |
 |---|---|---|---|
-| `COOKIE_SECURE` | `false` | `true` | La cookie de refresco solo debe viajar por HTTPS. Con `false` en producción se puede interceptar. |
-| `WEB_ORIGIN` | `http://localhost:8080` | `https://tu-dominio` | Es lo que autoriza el origen cruzado. Si no coincide, el navegador bloquea todas las llamadas. |
-| `NODE_ENV` | `development` | `production` | |
-| `JWT_SECRET` | uno local | **otro distinto** | Un secreto que estuvo en una máquina de desarrollo ya no es secreto. |
-| `POSTGRES_PASSWORD` | una local | otra distinta | Igual. |
+| `COOKIE_SECURE` | `false` | `true` | La cookie de refresco solo debe viajar por HTTPS. |
+| `WEB_ORIGIN` | `http://localhost:8080` | `https://tu-dominio` | Autoriza el origen cruzado; si no coincide, el navegador bloquea todo. |
+| `NODE_ENV` | `development` | `production` | Activa los límites de peticiones y las comprobaciones de arranque. |
+| `JWT_SECRET`, `POSTGRES_PASSWORD` | unos locales | **otros distintos** | Un secreto que estuvo en una máquina de desarrollo ya no es secreto. |
 
-### 4.2 HTTPS, y por qué aquí importa más de lo normal
+Todo eso lo fija [`infra/compose.production.yml`](../infra/compose.production.yml)
+y lo exige la API al arrancar: con `NODE_ENV=production` rechaza `COOKIE_SECURE=false`,
+un origen sin HTTPS, un JWT corto o un correo sin configurar. Los secretos viven
+en `/etc/uml/production.env` con permisos 600, fuera del repositorio. Solo se
+publican los puertos 80 y 443; base de datos, API y colaboración quedan dentro de
+la red de Docker.
 
-La colaboración va por **WebSocket**. Sobre HTTPS el navegador exige `wss://`, no
-`ws://`, y rechaza la mezcla sin dar un error legible: la pizarra simplemente no
-conecta. El proxy tiene que terminar TLS y reenviar la conexión con las cabeceras
-`Upgrade` y `Connection`, que
-[`infra/nginx.conf`](../infra/nginx.conf) ya pone.
+### 4.3 Qué ya está resuelto
 
-La forma más corta de conseguir el certificado es el perfil `demo`, que usa Caddy
-([`infra/caddy/Caddyfile`](../infra/caddy/Caddyfile)): con un dominio real
-apuntando a la máquina, Caddy pide y renueva el certificado de Let's Encrypt
-solo. Habría que cambiar `:80` por el dominio.
+- **Copias.** Un contenedor hace `pg_dump` cada 24 horas, lo verifica, lo sube al
+  bucket y solo entonces marca éxito. `restore-check` restaura la última copia en
+  un PostgreSQL temporal para probar que sirve.
+- **Límite de peticiones.** Global por IP, más estricto en login/registro/
+  recuperación, y una cuota por usuario para IA, importación y generación.
+- **Versiones y vuelta atrás.** `production.sh deploy` etiqueta las imágenes con
+  el commit, hace copia antes de migrar y guarda la versión buena; `rollback`
+  vuelve a la anterior si las migraciones no cambiaron.
+- **Supervisión.** Un temporizador de systemd comprueba cada cinco minutos HTTPS,
+  base, colaboración, antigüedad de la copia y disco, y puede avisar a un webhook.
+- **Prueba reproducible.** `npm run test:production` levanta la configuración de
+  producción en contenedores temporales y verifica HTTPS, WSS, cookies seguras,
+  límites y restauración. La ejecuta CI y funciona también desde Windows.
 
-### 4.3 Lo que falta de verdad
+### 4.4 Descargas y espacio en el servidor
 
-- **Persistencia y copias de la base.** El volumen de PostgreSQL vive en la
-  máquina. En un servidor de verdad hace falta una copia programada; sin ella,
-  una máquina perdida son todos los proyectos perdidos.
-- **Los secretos no pueden vivir en un archivo `.env` en el servidor.** Para un
-  despliegue real: secretos del proveedor de nube, o al menos un archivo con
-  permisos restringidos fuera del árbol del repositorio.
-- **Límite de peticiones.** No hay ninguno. Registrar cuentas, probar contraseñas
-  o pedir generaciones son operaciones sin freno; en una red local no importa, en
-  internet sí.
-- **Un dominio y un servidor.** Cualquier proveedor con Docker sirve: la
-  composición ya levanta los cuatro servicios.
-- **Registro y alertas.** Hoy los registros van a la salida del contenedor y
-  nadie los recoge. Para saber que algo se cayó hay que mirar a mano.
+El servidor **no guarda ningún ZIP ni APK**. Generar congela una copia del
+diagrama en PostgreSQL (unos KB) y al pulsar **Descargar backend** o **Descargar
+Android + backend** se vuelve a emitir desde esa copia, comprobando que los bytes
+coinciden con los registrados. El historial de la pestaña Generar tiene un botón
+de descarga por cada generación anterior y un botón **Eliminar** para retirarla
+junto con su copia congelada.
+
+El APK lo compila quien descarga, en su PC, con `.\apk.bat build`; la VM no
+necesita Flutter, Android SDK ni Java. Lo que sí ocupa espacio en la VM son las
+imágenes Docker de cada versión desplegada, la base y las copias locales:
+`production.sh disk` lo muestra y `production.sh prune` borra las imágenes que ya
+no sirven para rollback.
+
+### 4.5 Pendiente
+
 - **RNF-14, el registro estructurado, está incompleto**: ver
   [`pendientes.md`](pendientes.md) §2.1.
-
-**Ninguno de estos puntos bloquea la defensa**, que es en red local. Están aquí
-para que la pregunta «¿y esto se puede subir a internet?» tenga una respuesta
-concreta en lugar de un «sí, supongo».
+- Los contadores de peticiones viven en memoria: valen para una sola instancia
+  de la API, que es lo que despliega esta configuración.
 
 ---
 

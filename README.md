@@ -19,6 +19,11 @@ Para preparar un ejemplo Android: `npm run demo:mobile`. En la carpeta generada,
 
 ## Arranque rápido
 
+Para AWS EC2 o un VPS con dominio HTTPS, seguir la [guía de producción](infra/DEPLOYMENT.md).
+Incluye Compose separado, certificados, cuotas, copias S3, restauración aislada,
+monitorización y actualización por versión. `npm run test:production` verifica el
+entorno HTTPS en contenedores temporales.
+
 ### Aprender a usar el software
 
 Para practicar directamente en la interfaz, abre **Ayuda → Guiarme en esta pantalla**. El recorrido resalta controles reales y muestra instrucciones junto a ellos; detecta escritura y clics, permite ir al control, volver, omitir o pausar con Escape. Continúa cuando navegas de proyectos a una pizarra. **Retomar recorrido interactivo** recupera el último paso guardado para esa pantalla. Puede abrir paneles o pestañas para mostrar controles, pero crear datos, importar y generar requieren acciones del usuario. Los pasos omitidos no certifican que se hayan realizado las operaciones.

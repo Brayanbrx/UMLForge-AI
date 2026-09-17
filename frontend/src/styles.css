@@ -2853,6 +2853,14 @@ label > span:first-child {
   display: flex;
   gap: 0.3rem;
   padding-left: 2.2rem;
+  flex-wrap: wrap;
+}
+
+/* Retirar una generacion es irreversible: se distingue de las descargas y se
+   empuja al final de la fila para que no quede al lado de «Backend». */
+.generacion .historial .acciones-historial .eliminar {
+  margin-left: auto;
+  color: var(--error);
 }
 
 /* Tiradores de redimension: solo con la tarjeta seleccionada, y del color

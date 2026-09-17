@@ -41,12 +41,17 @@
     "bank:report": "npm run report --workspace @uml/fixtures",
     "test:api": "vitest run --config config/vitest.integration.config.ts",
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
+    "test:production": "node scripts/verify-production.mjs",
     "e2e:install": "playwright install --with-deps chromium",
     "test:bank": "tsx shared/generator-backend/tests/verify-bank.ts",
     "demo:backend": "tsx scripts/generate-demo-backend.ts",
     "predemo:mobile": "tsc --build shared/generator-backend fixtures shared/xmi",
     "demo:mobile": "tsx scripts/generate-demo-backend.ts --mobile",
     "seed": "tsx scripts/seed-demo.ts"
+  },
+  "overrides": {
+    "deepmerge-ts": "8.0.2",
+    "mysql2": "3.24.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

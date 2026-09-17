@@ -18,7 +18,7 @@ COPY fixtures/package.json fixtures/
 COPY backend/api/package.json backend/api/
 COPY backend/collab/package.json backend/collab/
 COPY frontend/package.json frontend/
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 
 FROM deps AS build
 WORKDIR /app
@@ -41,7 +41,7 @@ COPY --from=deps /app/shared/ shared/
 COPY --from=deps /app/fixtures/ fixtures/
 COPY --from=deps /app/backend/ backend/
 COPY --from=deps /app/frontend/ frontend/
-RUN npm ci --omit=dev --omit=optional --ignore-scripts --workspace @uml/collab --include-workspace-root
+RUN npm ci --no-audit --no-fund --omit=dev --omit=optional --ignore-scripts --workspace @uml/collab --include-workspace-root
 
 # El cliente generado si es runtime; el CLI de Prisma no.
 COPY --from=deps /app/node_modules/.prisma/ node_modules/.prisma/

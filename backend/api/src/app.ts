@@ -17,6 +17,7 @@ import { importRoutes } from './modules/import/routes.js';
 import { projectRoutes } from './modules/projects/routes.js';
 import { authPlugin } from './plugins/auth.js';
 import { prismaPlugin } from './plugins/prisma.js';
+import { securityPlugin } from './plugins/security.js';
 
 export const SERVICE_NAME = 'api';
 
@@ -33,13 +34,20 @@ export async function buildApp(config: Config = loadConfig()): Promise<FastifyIn
     logger:
       config.NODE_ENV === 'test'
         ? false
-        : { level: config.LOG_LEVEL, base: { service: SERVICE_NAME } },
+        : {
+            level: config.LOG_LEVEL,
+            base: { service: SERVICE_NAME },
+            redact: ['req.headers.authorization', 'req.headers.cookie', 'res.headers.set-cookie'],
+          },
     genReqId: () => crypto.randomUUID(),
+    trustProxy: (_address, hop) => hop < config.TRUST_PROXY_HOPS,
+    requestTimeout: 30_000,
   });
 
   await app.register(cors, { origin: config.WEB_ORIGIN, credentials: true });
   await app.register(cookie);
   await app.register(prismaPlugin, { config });
+  await app.register(securityPlugin, { config });
   await app.register(authPlugin, { config });
 
   app.setErrorHandler(errorHandler);
@@ -50,6 +58,19 @@ export async function buildApp(config: Config = loadConfig()): Promise<FastifyIn
     schemaVersion: SCHEMA_VERSION,
     uptimeSeconds: Math.round(process.uptime()),
   }));
+
+  app.get('/ready', async (_request, reply) => {
+    try {
+      await app.prisma.$queryRaw`SELECT 1`;
+      const collab = await fetch(`${config.COLLAB_INTERNAL_URL}/health`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!collab.ok) throw new Error('collab unavailable');
+      return { status: 'ok', service: SERVICE_NAME };
+    } catch {
+      return reply.code(503).send({ status: 'unavailable', service: SERVICE_NAME });
+    }
+  });
 
   // Una sola pasarela de IA para todo el proceso. Antes el asistente y la
   // importacion construian la suya por separado, con lo que el registro de uso

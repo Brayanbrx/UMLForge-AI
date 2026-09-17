@@ -19,7 +19,7 @@ COPY fixtures/package.json fixtures/
 COPY backend/api/package.json backend/api/
 COPY backend/collab/package.json backend/collab/
 COPY frontend/package.json frontend/
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 COPY tsconfig.json ./
 COPY config/tsconfig.base.json config/
 COPY shared/ shared/

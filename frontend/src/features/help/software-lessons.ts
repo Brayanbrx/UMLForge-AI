@@ -151,7 +151,7 @@ export const softwareLessons: readonly SoftwareLesson[] = [
     ],
     practice:
       'Decide si necesitas solo el backend o también Android antes de generar. Cada descarga corresponde a una versión del diagrama.',
-    tip: 'El ZIP Android contiene el proyecto Flutter: no es una APK lista para instalar. La APK se compila con Flutter: el ZIP trae apk.bat y apk.sh, que con Flutter instalado compilan el APK e incluso lo instalan en el teléfono por USB con una sola orden. Los lectores pueden descargar generaciones existentes.',
+    tip: 'El ZIP Android contiene el proyecto Flutter: no es una APK lista para instalar. La APK se compila con Flutter: el ZIP trae apk.bat y apk.sh, que con Flutter instalado compilan el APK e incluso lo instalan en el teléfono por USB con una sola orden. Los lectores pueden descargar generaciones existentes. El servidor no guarda los ZIP: los vuelve a emitir desde la versión congelada del diagrama. Eliminar, en el historial, retira esa versión y la generación deja de poder descargarse; no afecta a lo que ya descargaste.',
   },
   {
     id: 'account',

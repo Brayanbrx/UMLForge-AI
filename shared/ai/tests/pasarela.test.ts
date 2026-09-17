@@ -51,12 +51,67 @@ describe('seleccion de proveedor (6.3)', () => {
   });
 
   it('rechaza un proveedor que no sabe atender ese puerto', () => {
-    // Cloudflare esta aqui solo por Whisper. Aceptarlo para texto y caer al
-    // simulado en silencio haria creer que se probo un proveedor que nunca fue
-    // llamado. Groq si atiende los tres puertos desde que entro a la cadena.
-    expect(() => loadAiConfig({ AI_LLM_PROVIDER: 'cloudflare' })).toThrow(/AI_LLM_PROVIDER/);
+    // Aceptar una combinacion imposible y caer al simulado en silencio haria
+    // creer que se probo un proveedor que nunca fue llamado. La voz solo la
+    // atienden groq, cloudflare y mistral.
     expect(() => loadAiConfig({ AI_SPEECH_PROVIDER: 'anthropic' })).toThrow(/AI_SPEECH_PROVIDER/);
-    expect(() => loadAiConfig({ AI_VISION_PROVIDER: 'cloudflare' })).toThrow(/AI_VISION_PROVIDER/);
+    expect(() => loadAiConfig({ AI_SPEECH_PROVIDER: 'gemini' })).toThrow(/AI_SPEECH_PROVIDER/);
+    expect(() => loadAiConfig({ AI_SPEECH_PROVIDER: 'nvidia' })).toThrow(/AI_SPEECH_PROVIDER/);
+  });
+
+  it('cloudflare tambien sirve texto e imagen, con las mismas dos credenciales', () => {
+    // Workers AI por su capa compatible con OpenAI: la cuenta va en la ruta,
+    // igual que en la voz, y como compatible exige modelo.
+    const puertos = createAiPorts(
+      loadAiConfig({
+        AI_LLM_PROVIDER: 'cloudflare',
+        AI_LLM_MODEL: '@cf/openai/gpt-oss-120b',
+        AI_VISION_PROVIDER: 'cloudflare',
+        AI_VISION_MODEL: '@cf/meta/llama-4-scout-17b-16e-instruct',
+        CLOUDFLARE_ACCOUNT_ID: 'cuenta',
+        CLOUDFLARE_API_TOKEN: 'testigo',
+      }),
+    );
+    expect(puertos.llm.name).toBe('cloudflare');
+    expect(puertos.vision.name).toBe('cloudflare');
+
+    expect(() =>
+      createAiPorts(
+        loadAiConfig({
+          AI_LLM_PROVIDER: 'cloudflare',
+          AI_LLM_MODEL: '@cf/openai/gpt-oss-120b',
+          CLOUDFLARE_API_TOKEN: 'testigo',
+        }),
+      ),
+    ).toThrow(/CLOUDFLARE_ACCOUNT_ID/);
+    expect(() =>
+      loadAiConfig({
+        AI_LLM_PROVIDER: 'cloudflare',
+        CLOUDFLARE_ACCOUNT_ID: 'cuenta',
+        CLOUDFLARE_API_TOKEN: 'testigo',
+      }),
+    ).toThrow(/AI_LLM_MODEL/);
+  });
+
+  it('nvidia y cohere entran como compatibles con OpenAI y piden su clave', () => {
+    expect(() =>
+      createAiPorts(
+        loadAiConfig({
+          AI_LLM_PROVIDER: 'nvidia',
+          AI_LLM_MODEL: 'meta/llama-4-scout-17b-16e-instruct',
+        }),
+      ),
+    ).toThrow(/NVIDIA_API_KEY/);
+    expect(() =>
+      createAiPorts(
+        loadAiConfig({ AI_VISION_PROVIDER: 'cohere', AI_VISION_MODEL: 'command-a-vision-07-2025' }),
+      ),
+    ).toThrow(/COHERE_API_KEY/);
+    expect(
+      createAiPorts(
+        loadAiConfig({ AI_LLM_PROVIDER: 'nvidia', AI_LLM_MODEL: 'modelo', NVIDIA_API_KEY: 'k' }),
+      ).llm.name,
+    ).toBe('nvidia');
   });
 
   it('una clave por proveedor sirve a los dos puertos que lo usan', () => {
@@ -519,19 +574,20 @@ describe('el instructivo y el codigo no divergen', () => {
   });
 
   it('la cadena que el ejemplo propone se acepta tal cual', () => {
-    // El bloque comentado del final: gemini→openrouter y groq→cloudflare.
+    // El bloque comentado del final: groq→gemini, gemini→mistral y groq→cloudflare.
     const config = loadAiConfig({
       ...variables(ejemplo, { comentadas: true }),
       GEMINI_API_KEY: 'clave',
       OPENROUTER_API_KEY: 'clave',
       GROQ_API_KEY: 'clave',
+      MISTRAL_API_KEY: 'clave',
       CLOUDFLARE_ACCOUNT_ID: 'cuenta',
       CLOUDFLARE_API_TOKEN: 'testigo',
     });
 
     expect(describeAiChains(config)).toBe(
-      'texto: gemini/gemini-3.6-flash → openrouter/anthropic/claude-sonnet-4.5 | ' +
-        'imagen: gemini/gemini-3.6-flash → openrouter/anthropic/claude-sonnet-4.5 | ' +
+      'texto: groq/openai/gpt-oss-120b → gemini/gemini-3.5-flash-lite | ' +
+        'imagen: gemini/gemini-3.5-flash → mistral/ministral-14b-latest | ' +
         'voz: groq/whisper-large-v3-turbo → cloudflare',
     );
     expect(() => createAiPorts(config)).not.toThrow();

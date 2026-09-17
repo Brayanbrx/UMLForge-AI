@@ -21,20 +21,31 @@ export const PROVIDERS = [
   'zai',
   'moonshot',
   'sambanova',
+  'nvidia',
+  'cohere',
 ] as const;
 export type ProviderName = (typeof PROVIDERS)[number];
 
-/** Que proveedor sabe atender cada puerto. */
+/**
+ * Que proveedor sabe atender cada puerto.
+ *
+ * Cloudflare sirve las tres cosas: Whisper para la voz y, por su capa
+ * compatible con OpenAI (`/ai/v1`), modelos de texto e imagen como gpt-oss-120b
+ * y Llama 4 Scout, con las mismas dos credenciales que ya tenia la voz.
+ */
 export const LLM_PROVIDERS = [
   'mock',
   'anthropic',
   'gemini',
   'openrouter',
   'groq',
+  'cloudflare',
   'mistral',
   'zai',
   'moonshot',
   'sambanova',
+  'nvidia',
+  'cohere',
 ] as const;
 export const VISION_PROVIDERS = [
   'mock',
@@ -42,10 +53,13 @@ export const VISION_PROVIDERS = [
   'gemini',
   'openrouter',
   'groq',
+  'cloudflare',
   'mistral',
   'zai',
   'moonshot',
   'sambanova',
+  'nvidia',
+  'cohere',
 ] as const;
 export const SPEECH_PROVIDERS = ['mock', 'groq', 'cloudflare', 'mistral'] as const;
 
@@ -111,7 +125,17 @@ const endpoint = z
     return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash;
   }, 'La URL debe ser HTTPS sin credenciales, query ni fragmento.')
   .optional();
-const COMPATIBLE = ['openrouter', 'groq', 'mistral', 'zai', 'moonshot', 'sambanova'];
+const COMPATIBLE = [
+  'openrouter',
+  'groq',
+  'cloudflare',
+  'mistral',
+  'zai',
+  'moonshot',
+  'sambanova',
+  'nvidia',
+  'cohere',
+];
 
 const schema = z
   .object({
@@ -145,11 +169,15 @@ const schema = z
     ZAI_API_KEY: z.string().trim().optional(),
     MOONSHOT_API_KEY: z.string().trim().optional(),
     SAMBANOVA_API_KEY: z.string().trim().optional(),
+    NVIDIA_API_KEY: z.string().trim().optional(),
+    COHERE_API_KEY: z.string().trim().optional(),
     MISTRAL_BASE_URL: endpoint,
     ZAI_BASE_URL: endpoint,
     MOONSHOT_BASE_URL: endpoint,
     SAMBANOVA_BASE_URL: endpoint,
     GROQ_BASE_URL: endpoint,
+    NVIDIA_BASE_URL: endpoint,
+    COHERE_BASE_URL: endpoint,
 
     // --- Credenciales, una por proveedor ------------------------------------
     ANTHROPIC_API_KEY: z.string().trim().optional(),
@@ -223,11 +251,10 @@ const schema = z
         const key = `${entry.provider}/${entry.model ?? ''}`;
         if (seen.has(key)) issue(`Respaldo duplicado: ${key}.`);
         seen.add(key);
-        // Groq en voz va por su propio adaptador, que ya sabe a que modelo de
-        // Whisper llamar. En texto e imagen si sirve muchos y hay que nombrarlo.
-        const necesitaModelo =
-          COMPATIBLE.includes(entry.provider) &&
-          !(port.nombre === 'voz' && entry.provider === 'groq');
+        // Los adaptadores de voz ya saben a que modelo de Whisper o Voxtral
+        // llamar. En texto e imagen cada proveedor sirve muchos y hay que
+        // nombrarlo: ninguno es el evidente.
+        const necesitaModelo = COMPATIBLE.includes(entry.provider) && port.nombre !== 'voz';
         if (necesitaModelo && !entry.model)
           issue(
             `${entry.provider} necesita AI_${port.nombre === 'texto' ? 'LLM' : port.nombre === 'imagen' ? 'VISION' : 'SPEECH'}_MODEL o model en el respaldo.`,
@@ -431,6 +458,8 @@ function credencial(config: AiConfig, provider: ProviderName, variable: string):
     zai: config.ZAI_API_KEY,
     moonshot: config.MOONSHOT_API_KEY,
     sambanova: config.SAMBANOVA_API_KEY,
+    nvidia: config.NVIDIA_API_KEY,
+    cohere: config.COHERE_API_KEY,
     anthropic: config.ANTHROPIC_API_KEY,
     gemini: config.GEMINI_API_KEY,
     openrouter: config.OPENROUTER_API_KEY,
@@ -480,10 +509,13 @@ function construirLlm(
         ...comun,
       });
     case 'groq':
+    case 'cloudflare':
     case 'mistral':
     case 'zai':
     case 'moonshot':
     case 'sambanova':
+    case 'nvidia':
+    case 'cohere':
       return new OpenRouterLlmPort(
         compatibleOptions(config, provider, model as string, config.AI_TIMEOUT_MS),
       );
@@ -525,10 +557,13 @@ function construirVision(
         ...comun,
       });
     case 'groq':
+    case 'cloudflare':
     case 'mistral':
     case 'zai':
     case 'moonshot':
     case 'sambanova':
+    case 'nvidia':
+    case 'cohere':
       return new OpenRouterVisionPort(
         compatibleOptions(config, provider, model as string, timeoutMs),
       );
@@ -592,10 +627,22 @@ function construirSpeech(
 /** Endpoints de API general: no endpoints de planes exclusivos de coding. */
 function compatibleOptions(
   config: AiConfig,
-  provider: 'groq' | 'mistral' | 'zai' | 'moonshot' | 'sambanova',
+  provider:
+    'groq' | 'cloudflare' | 'mistral' | 'zai' | 'moonshot' | 'sambanova' | 'nvidia' | 'cohere',
   model: string,
   timeoutMs: number,
 ) {
+  if (
+    provider === 'cloudflare' &&
+    (config.CLOUDFLARE_ACCOUNT_ID === undefined || config.CLOUDFLARE_ACCOUNT_ID.length === 0)
+  ) {
+    // Igual que en la voz: la cuenta va en la ruta y sin ella el sintoma
+    // seria un 404 del proveedor.
+    throw new Error(
+      'El proveedor cloudflare necesita CLOUDFLARE_ACCOUNT_ID ademas de ' +
+        'CLOUDFLARE_API_TOKEN. Deja AI_*_PROVIDER=mock si todavia no lo tienes.',
+    );
+  }
   const urls = {
     mistral: config.MISTRAL_BASE_URL ?? 'https://api.mistral.ai/v1',
     zai: config.ZAI_BASE_URL ?? 'https://api.z.ai/api/paas/v4',
@@ -604,6 +651,13 @@ function compatibleOptions(
     // Groq sirve texto y vision por su capa compatible con OpenAI; la voz va
     // por su propio adaptador, que no pasa por aqui.
     groq: config.GROQ_BASE_URL ?? 'https://api.groq.com/openai/v1',
+    // Workers AI por su capa compatible con OpenAI. Cuota gratuita diaria.
+    cloudflare:
+      'https://api.cloudflare.com/client/v4/accounts/' +
+      encodeURIComponent(config.CLOUDFLARE_ACCOUNT_ID ?? '') +
+      '/ai/v1',
+    nvidia: config.NVIDIA_BASE_URL ?? 'https://integrate.api.nvidia.com/v1',
+    cohere: config.COHERE_BASE_URL ?? 'https://api.cohere.ai/compatibility/v1',
   };
   return {
     provider,
@@ -613,8 +667,10 @@ function compatibleOptions(
     maxOutputTokens: config.AI_COMPATIBLE_MAX_OUTPUT_TOKENS,
     apiKey: credencial(config, provider, 'AI_*_PROVIDER'),
     baseUrl: urls[provider].replace(/\/$/, ''),
-    // El prompt sigue exigiendo JSON y el resultado siempre se valida.
-    jsonMode: true,
+    // El prompt sigue exigiendo JSON y el resultado siempre se valida. NVIDIA
+    // no garantiza `response_format` en todos sus modelos: alli se confia en
+    // el esquema del prompt y en la validacion de la respuesta.
+    jsonMode: provider !== 'nvidia',
     ...(provider === 'moonshot' && model.startsWith('kimi-k3')
       ? { reasoningEffort: 'low' as const }
       : provider === 'zai' || provider === 'moonshot'

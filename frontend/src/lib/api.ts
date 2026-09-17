@@ -413,6 +413,13 @@ export const api = {
     apiRequest<GenerationSummary[]>(`/boards/${boardId}/generations`),
 
   /**
+   * Quita una generacion del historial y libera su version congelada en el
+   * servidor. No hay ningun ZIP que borrar: se regenera al descargar.
+   */
+  deleteGeneration: (generationId: string) =>
+    apiRequest<void>(`/generations/${generationId}`, { method: 'DELETE' }),
+
+  /**
    * Registra el lote para auditoria (RF-A09).
    *
    * No se espera la respuesta en el camino de edicion: el lote ya se aplico en

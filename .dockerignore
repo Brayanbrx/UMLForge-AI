@@ -15,6 +15,9 @@ node_modules
 # Secretos: la configuracion entra por variables de entorno, nunca en una capa.
 **/.env
 **/.env.*
+**/*.env
+**/*.dump
+**/*.dump.partial
 !**/.env.example
 **/*.pem
 **/*.keystore

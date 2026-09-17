@@ -54,11 +54,9 @@ export async function pedirJson<T>(options: PeticionJsonOptions): Promise<T> {
 
     let respuesta: Response;
     let cuerpo: string;
+    const plazo = senal(options.timeoutMs, options.signal);
     try {
-      respuesta = await fetch(options.url, {
-        ...options.init,
-        signal: senal(options.timeoutMs, options.signal),
-      });
+      respuesta = await fetch(options.url, { ...options.init, signal: plazo.signal });
       // fetch resuelve al recibir las cabeceras. El cuerpo aun puede cortarse
       // o agotar el plazo: tambien debe activar el reintento y el respaldo.
       cuerpo = await respuesta.text();
@@ -67,6 +65,8 @@ export async function pedirJson<T>(options: PeticionJsonOptions): Promise<T> {
       if (options.signal?.aborted === true) throw error;
       ultimo = error;
       continue;
+    } finally {
+      plazo.liberar();
     }
 
     if (respuesta.ok) {
@@ -134,10 +134,42 @@ export async function pedirJson<T>(options: PeticionJsonOptions): Promise<T> {
  *
  * El limite se cuenta por intento, no para toda la serie: un reintento que
  * hereda el reloj gastado del anterior nace muerto.
+ *
+ * Se construye con un `AbortController` y un temporizador propio, y no con
+ * `AbortSignal.any([AbortSignal.timeout(ms), llamante])`. Esa forma tiene un
+ * fallo en Node 22: la senal compuesta solo guarda referencias debiles a sus
+ * fuentes, y la de `timeout` no la retiene nadie mas, asi que el recolector
+ * de basura la elimina y el plazo nunca dispara. Medido: con un limite de un
+ * segundo, ocho de ocho peticiones de tres segundos terminaban sin abortar.
+ * El sintoma en produccion era un primario que tardaba 30 s con
+ * `AI_TIMEOUT_MS=15000` y un respaldo que nunca llegaba a intervenir.
+ *
+ * `liberar` quita el temporizador y el oyente cuando la peticion termina, para
+ * que un plazo largo no quede vivo despues de una respuesta rapida.
  */
-function senal(timeoutMs: number, delLlamante?: AbortSignal): AbortSignal {
-  const porTiempo = AbortSignal.timeout(timeoutMs);
-  return delLlamante === undefined ? porTiempo : AbortSignal.any([porTiempo, delLlamante]);
+function senal(
+  timeoutMs: number,
+  delLlamante?: AbortSignal,
+): { readonly signal: AbortSignal; readonly liberar: () => void } {
+  const controlador = new AbortController();
+  const temporizador = setTimeout(
+    () =>
+      controlador.abort(
+        new DOMException(`El proveedor no respondio en ${String(timeoutMs)} ms.`, 'TimeoutError'),
+      ),
+    timeoutMs,
+  );
+  const propagar = (): void => controlador.abort(delLlamante?.reason);
+  if (delLlamante?.aborted === true) propagar();
+  else delLlamante?.addEventListener('abort', propagar, { once: true });
+
+  return {
+    signal: controlador.signal,
+    liberar: (): void => {
+      clearTimeout(temporizador);
+      delLlamante?.removeEventListener('abort', propagar);
+    },
+  };
 }
 
 /**

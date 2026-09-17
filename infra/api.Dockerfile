@@ -19,7 +19,7 @@ COPY fixtures/package.json fixtures/
 COPY backend/api/package.json backend/api/
 COPY backend/collab/package.json backend/collab/
 COPY frontend/package.json frontend/
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 
 # Imagen de un solo uso para `prisma migrate deploy`. Conserva el CLI, que es
 # una herramienta de construccion/operacion y no una dependencia del proceso
@@ -47,7 +47,7 @@ COPY --from=deps /app/shared/ shared/
 COPY --from=deps /app/fixtures/ fixtures/
 COPY --from=deps /app/backend/ backend/
 COPY --from=deps /app/frontend/ frontend/
-RUN npm ci --omit=dev --omit=optional --ignore-scripts --workspace @uml/api --include-workspace-root
+RUN npm ci --no-audit --no-fund --omit=dev --omit=optional --ignore-scripts --workspace @uml/api --include-workspace-root
 
 # `prisma generate` ya corrio en `deps`. El proceso solo necesita el cliente
 # resultante; ni el CLI ni la configuracion de migraciones.

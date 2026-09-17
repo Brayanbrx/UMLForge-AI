@@ -530,6 +530,104 @@ describe('generacion desde la pizarra y auditoria', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Limpieza del historial
+  // -------------------------------------------------------------------------
+
+  describe('eliminar una generacion (limpieza del servidor)', () => {
+    it('borra el registro y la version congelada, y la descarga deja de existir', async () => {
+      const generacion = await api.request('POST', `/boards/${boardId}/generations`, {
+        token: duena.token,
+      });
+      const version = generacion.body.snapshotVersion as number;
+      expect(
+        await api.app.prisma.boardSnapshot.findUnique({
+          where: { boardId_version: { boardId, version } },
+        }),
+      ).not.toBeNull();
+
+      const borrado = await api.request('DELETE', `/generations/${generacion.body.id}`, {
+        token: duena.token,
+      });
+      expect(borrado.status).toBe(204);
+
+      // Lo unico que ocupaba espacio era la copia congelada: se va con la
+      // generacion. La version viva (1) sigue ahi para seguir editando.
+      expect(
+        await api.app.prisma.boardSnapshot.findUnique({
+          where: { boardId_version: { boardId, version } },
+        }),
+      ).toBeNull();
+      expect(
+        await api.app.prisma.boardSnapshot.findUnique({
+          where: { boardId_version: { boardId, version: 1 } },
+        }),
+      ).not.toBeNull();
+
+      const descarga = await api.raw('GET', `/generations/${generacion.body.id}/download`, {
+        token: duena.token,
+      });
+      expect(descarga.status).toBe(404);
+
+      const historial = await api.request('GET', `/boards/${boardId}/generations`, {
+        token: duena.token,
+      });
+      expect(historial.body.some((g: { id: string }) => g.id === generacion.body.id)).toBe(false);
+    });
+
+    it('las demas generaciones siguen descargables', async () => {
+      const primera = await api.request('POST', `/boards/${boardId}/generations`, {
+        token: duena.token,
+      });
+      const segunda = await api.request('POST', `/boards/${boardId}/generations`, {
+        token: duena.token,
+      });
+
+      await api.request('DELETE', `/generations/${primera.body.id}`, { token: duena.token });
+
+      const descarga = await api.raw('GET', `/generations/${segunda.body.id}/download`, {
+        token: duena.token,
+      });
+      expect(descarga.status).toBe(200);
+    });
+
+    it('un rol de solo lectura no elimina; un extrano ni sabe que existe', async () => {
+      const generacion = await api.request('POST', `/boards/${boardId}/generations`, {
+        token: duena.token,
+      });
+
+      const lectorIntento = await api.request('DELETE', `/generations/${generacion.body.id}`, {
+        token: lector.token,
+      });
+      const extranoIntento = await api.request('DELETE', `/generations/${generacion.body.id}`, {
+        token: extrano.token,
+      });
+      const sinSesion = await api.request('DELETE', `/generations/${generacion.body.id}`);
+
+      expect(lectorIntento.status).toBe(403);
+      expect(extranoIntento.status).toBe(404);
+      expect(sinSesion.status).toBe(401);
+
+      // Sigue ahi, intacta.
+      const descarga = await api.raw('GET', `/generations/${generacion.body.id}/download`, {
+        token: duena.token,
+      });
+      expect(descarga.status).toBe(200);
+    });
+
+    it('eliminar dos veces devuelve 404 la segunda', async () => {
+      const generacion = await api.request('POST', `/boards/${boardId}/generations`, {
+        token: duena.token,
+      });
+      await api.request('DELETE', `/generations/${generacion.body.id}`, { token: duena.token });
+
+      const repetido = await api.request('DELETE', `/generations/${generacion.body.id}`, {
+        token: duena.token,
+      });
+      expect(repetido.status).toBe(404);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Auditoría
   // -------------------------------------------------------------------------
 
