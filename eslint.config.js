@@ -6,6 +6,11 @@ export default tseslint.config(
   {
     ignores: [
       'generated-output/**',
+      'output/**',
+      'tmp/**',
+      'temp/**',
+      '.agents/**',
+      '.claude/**',
       '**/dist/**',
       '**/dist-types/**',
       '**/node_modules/**',

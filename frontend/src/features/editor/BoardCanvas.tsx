@@ -7,10 +7,11 @@ import {
   MiniMap,
   Panel,
   ReactFlow,
+  getViewportForBounds,
   type Connection,
   type NodeChange,
   useReactFlow,
-  useUpdateNodeInternals,
+  useStore,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useTheme } from '../../components/ThemeProvider.js';
@@ -65,10 +66,10 @@ export function BoardCanvas(props: BoardCanvasProps): React.JSX.Element {
     relationshipSourceId,
     canWrite,
   } = props;
-  const { screenToFlowPosition, fitView } = useReactFlow<ClassNodeType, AsociacionEdgeType>();
-  const updateNodeInternals = useUpdateNodeInternals();
+  const { screenToFlowPosition, setViewport } = useReactFlow<ClassNodeType, AsociacionEdgeType>();
+  const canvasWidth = useStore((store) => store.width);
+  const canvasHeight = useStore((store) => store.height);
   const ultimaClaseRevelada = useRef<string | null>(null);
-  const ultimaFirmaExtremos = useRef('');
 
   // Que elementos estan implicados en un error, para pintarlos.
   const { conError, conAviso } = useMemo(() => {
@@ -180,39 +181,9 @@ export function BoardCanvas(props: BoardCanvasProps): React.JSX.Element {
   }, [state.semantic.relationships, state.semantic.classes, state.layout, selectedId, conError]);
 
   useEffect(() => {
-    if (state.semantic.relationships.length === 0) {
-      ultimaFirmaExtremos.current = '';
-      return;
-    }
-
-    const firmaExtremos = `${state.semantic.classes
-      .map((item) => item.id)
-      .sort()
-      .join(',')}#${state.semantic.relationships
-      .map((item) => `${item.sourceClassId}>${item.targetClassId}`)
-      .sort()
-      .join(',')}`;
-    if (firmaExtremos === ultimaFirmaExtremos.current) return;
-    ultimaFirmaExtremos.current = firmaExtremos;
-
-    // Una actualizacion remota puede integrar la relacion en el Y.Doc en el
-    // mismo instante en que React Flow termina de medir los conectores de sus
-    // clases. En esa carrera el modelo ya contiene la arista, pero la libreria
-    // no tiene aun los `handleBounds` y la omite hasta que algo vuelve a medir
-    // el nodo. Forzar la medicion de los extremos despues del commit hace que la
-    // arista aparezca de inmediato sin reiniciar el lienzo ni perder la camara.
-    const extremos = [
-      ...new Set(
-        state.semantic.relationships.flatMap((item) => [item.sourceClassId, item.targetClassId]),
-      ),
-    ];
-    updateNodeInternals(extremos);
-  }, [state.semantic.classes, state.semantic.relationships, updateNodeInternals]);
-
-  useEffect(() => {
     if (revealClassId === null || ultimaClaseRevelada.current === revealClassId) return;
     const nueva = nodes.find((node) => node.id === revealClassId);
-    if (nueva === undefined) return;
+    if (nueva === undefined || canvasWidth === 0 || canvasHeight === 0) return;
     ultimaClaseRevelada.current = revealClassId;
 
     // La accion rapida de la barra crea en coordenadas del modelo. Si la vista
@@ -221,8 +192,24 @@ export function BoardCanvas(props: BoardCanvasProps): React.JSX.Element {
     // para no moverle la camara a los demas colaboradores.
     // Sin animacion ni un frame diferido: el siguiente gesto suele ser
     // arrastrar un conector y la camara no debe moverse debajo del puntero.
-    void fitView({ nodes: [nueva], maxZoom: 1, padding: 0.25, duration: 0 });
-  }, [fitView, nodes, revealClassId]);
+    // El nodo puede no estar aun en el registro interno de React Flow. Usar
+    // sus dimensiones conocidas evita que fitView omita la clase recien creada.
+    void setViewport(
+      getViewportForBounds(
+        {
+          ...nueva.position,
+          width: nueva.width ?? ANCHO_NODO,
+          height: nueva.height ?? altoDeNodo(nueva.data.umlClass.attributes.length),
+        },
+        canvasWidth,
+        canvasHeight,
+        0.2,
+        1,
+        0.25,
+      ),
+      { duration: 0 },
+    );
+  }, [canvasWidth, canvasHeight, setViewport, nodes, revealClassId]);
 
   return (
     <ReactFlow

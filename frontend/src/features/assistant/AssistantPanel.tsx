@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import { apiRequest } from '../../lib/api.js';
 import { useSpeech } from './useSpeech.js';
 import { prepareDictation } from './prepare-dictation.js';
+import { AssistantLearningGuide } from './AssistantLearningGuide.js';
 
 /**
  * Asistente por texto y voz (RF-030 a RF-037).
@@ -271,6 +272,21 @@ export function AssistantPanel({
           </button>
         </div>
       </header>
+
+      <div className="asistente-aprendizaje">
+        <AssistantLearningGuide
+          key={boardId}
+          model={state.semantic}
+          canWrite={canWrite}
+          canUseExample={!pendiente && !dictando && texto.trim() === '' && contexto.length === 0}
+          useExample={(nextMode, example) => {
+            setModo(nextMode);
+            setTexto(example);
+            setDictadoOriginal(null);
+            entrada.current?.focus();
+          }}
+        />
+      </div>
 
       <ol className="conversacion" data-testid="conversacion">
         {historial.length === 0 && (

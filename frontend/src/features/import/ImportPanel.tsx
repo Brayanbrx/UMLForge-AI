@@ -370,11 +370,13 @@ export function ImportPanel({
 
           {candidato.rationale !== null && <p className="derivados">{candidato.rationale}</p>}
 
+          {/* Abierto: aqui viene lo que la lectura omitio o supuso, y un candidato
+              con avisos plegados se aplica sin leerlos. */}
           {candidato.warnings.length > 0 && (
-            <details className="bloque-avisos">
+            <details className="bloque-avisos" open>
               <summary>
-                {candidato.warnings.length} aviso{candidato.warnings.length === 1 ? '' : 's'} del
-                archivo
+                {candidato.warnings.length} aviso{candidato.warnings.length === 1 ? '' : 's'}{' '}
+                {fuente?.kind === 'IMAGE' ? 'de la lectura' : 'del archivo'}
               </summary>
               <ul className="avisos-importacion" data-testid="avisos-importacion">
                 {candidato.warnings.map((aviso, indice) => (
@@ -494,19 +496,16 @@ export function ImportPanel({
               {candidato.options !== undefined && candidato.options.length > 0 && (
                 <p className="pista">Coincidencias: {candidato.options.join(', ')}</p>
               )}
+              {/* Sin lote no hay nada que aplicar, y repetir la lectura cuesta otra
+                  llamada al proveedor: se explica y se deja a la persona decidir si
+                  sube otra foto o corrige la pizarra antes. */}
+              <p className="pista">
+                La lectura no produjo ningún cambio que preparar. Puedes subir otra foto o ajustar
+                la pizarra y volver a intentarlo.
+              </p>
               <div className="acciones">
-                {fuente !== null && (
-                  <button
-                    type="button"
-                    className="principal"
-                    disabled={pendiente}
-                    onClick={() => void reintentarReemplazando()}
-                  >
-                    Reintentar reemplazando
-                  </button>
-                )}
                 <button type="button" onClick={() => setCandidato(null)}>
-                  Cancelar
+                  Cerrar
                 </button>
               </div>
             </>

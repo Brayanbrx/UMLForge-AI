@@ -2151,6 +2151,281 @@ label > span:first-child {
   padding: var(--e-3) var(--e-4) 0;
 }
 
+.asistente-aprendizaje {
+  padding: var(--e-2) var(--e-4) 0;
+}
+
+.asistente-aprendizaje > button {
+  width: 100%;
+}
+
+.guia-ia {
+  box-sizing: border-box;
+  width: min(38rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  padding: var(--e-5);
+  border: 1px solid var(--borde-fuerte);
+  border-radius: var(--r-lg);
+  background: var(--superficie);
+  color: var(--texto);
+  box-shadow: var(--sombra-2);
+}
+
+.guia-ia::backdrop {
+  background: rgb(0 0 0 / 55%);
+}
+
+.guia-ia-cabecera,
+.guia-ia-acciones {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--e-3);
+}
+
+.guia-ia-cabecera h2 {
+  margin: 0;
+  flex: 1 1 12rem;
+  font-size: var(--t-lg);
+}
+
+.guia-ia-paso {
+  color: var(--acento-texto);
+  font-weight: 600;
+}
+
+.guia-ia-consejo,
+.guia-ia-ejemplo {
+  padding: var(--e-3);
+  background: var(--superficie-2);
+  border-radius: var(--r-md);
+}
+
+.guia-ia-ejemplo h4 {
+  margin: 0;
+}
+
+.guia-ia-nota {
+  color: var(--texto-suave);
+  font-size: var(--t-sm);
+}
+
+.guia-ia-practica {
+  min-width: 0;
+  margin: 0;
+  padding: var(--e-3);
+  border: 1px solid var(--borde-fuerte);
+}
+
+.guia-ia-practica label {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--e-2);
+  margin-block: var(--e-3);
+}
+
+.guia-ia-practica input {
+  width: auto;
+  flex-shrink: 0;
+  margin-top: 0.35rem;
+}
+
+.guia-ia-acciones,
+.guia-ia-ayuda {
+  margin-top: var(--e-4);
+}
+
+.guia-ia-ayuda summary {
+  cursor: pointer;
+}
+
+.ayuda-software-boton {
+  flex-shrink: 0;
+}
+
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  pointer-events: none;
+}
+
+.tour-spotlight {
+  position: fixed;
+  border-radius: var(--r-md);
+  outline: 3px solid var(--acento);
+  box-shadow: 0 0 0 9999px rgb(0 0 0 / 25%);
+  pointer-events: none;
+}
+
+.tour-coach {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(23rem, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+  padding: var(--e-4);
+  color: var(--texto);
+  background: var(--superficie);
+  border: 1px solid var(--borde-fuerte);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sombra-2);
+  font-size: var(--t-base);
+  overflow-wrap: anywhere;
+}
+
+.tour-coach header,
+.tour-coach nav {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--e-2);
+}
+
+.tour-eyebrow {
+  font-size: var(--t-xs);
+  letter-spacing: 0.06em;
+  color: var(--acento-texto);
+  font-weight: 600;
+}
+
+.tour-progress-label,
+.tour-note {
+  font-size: var(--t-sm);
+  color: var(--texto-suave);
+}
+
+.tour-coach progress {
+  flex-shrink: 0;
+  width: 100%;
+  height: 0.4rem;
+  accent-color: var(--acento);
+}
+
+.tour-coach h2 {
+  flex-shrink: 0;
+  font-size: var(--t-lg);
+  line-height: 1.4;
+}
+
+.tour-feedback {
+  padding: var(--e-3);
+  background: var(--superficie-2);
+  border-radius: var(--r-md);
+}
+
+.tour-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.tour-target-button {
+  margin-bottom: var(--e-3);
+}
+
+.tour-note {
+  flex-shrink: 0;
+  margin-bottom: 0;
+}
+
+@media (max-width: 700px) {
+  .tour-coach {
+    max-height: 45dvh;
+  }
+
+  .tour-note {
+    display: none;
+  }
+}
+
+.guia-software {
+  width: min(62rem, calc(100vw - 2rem));
+  text-align: left;
+  font-weight: 400;
+  font-size: var(--t-md);
+}
+
+.guia-software-progreso {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--e-3);
+  margin-block: var(--e-4);
+}
+
+.guia-software-busqueda {
+  display: grid;
+  gap: var(--e-2);
+}
+
+.guia-software-contenido {
+  display: grid;
+  grid-template-columns: minmax(0, 13rem) minmax(0, 1fr);
+  gap: var(--e-5);
+  margin-top: var(--e-4);
+}
+
+.guia-software-temas {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: var(--e-2);
+}
+
+.guia-software-temas button {
+  width: 100%;
+  justify-content: space-between;
+  text-align: left;
+  white-space: normal;
+}
+
+.guia-software-temas button[aria-current='step'] {
+  border-color: var(--acento);
+  background: var(--acento-suave);
+  color: var(--acento-texto);
+}
+
+.guia-software-temas small {
+  margin-left: var(--e-2);
+}
+
+.guia-software-leccion li {
+  margin-bottom: var(--e-3);
+}
+
+.guia-software-leido {
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: var(--e-2);
+}
+
+.guia-software-leido input {
+  width: auto;
+}
+
+@media (max-width: 700px) {
+  .guia-software-contenido {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .guia-software-temas {
+    max-height: 11rem;
+    overflow-y: auto;
+  }
+}
+
 .conversacion {
   flex: 1;
   /* En unidades de ventana y no en porcentaje: asi el campo de entrada y el

@@ -190,14 +190,17 @@ describe('respuesta completa y coherente', () => {
     });
     expect(interpretarPropuesta('test', text).operations[0]).toMatchObject({ type: 'Integer' });
   });
-  it('una aclaracion visual no se pierde al descartar operaciones invalidas', () => {
+  it('una aclaracion visual no se pierde al descartar operaciones invalidas, ni las buenas', () => {
+    // La lectura ya se pago: la duda viaja como aviso junto a lo que si se leyo,
+    // en vez de vaciar la propuesta y obligar a otra llamada al proveedor.
     const text = JSON.stringify({
       operations: [create('Persona'), { op: 'NO_EXISTE' }],
       needsClarification: '¿Esta clase es Persona o Personal?',
     });
-    expect(interpretarPropuesta('test', text, { tolerante: true })).toEqual({
-      operations: [],
+    expect(interpretarPropuesta('test', text, { tolerante: true })).toMatchObject({
+      operations: [create('Persona')],
       needsClarification: '¿Esta clase es Persona o Personal?',
+      rationale: expect.stringContaining('Se descartaron 1 operaciones'),
     });
   });
   it.each([400, 403, 404])(

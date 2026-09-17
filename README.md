@@ -13,9 +13,21 @@ Generador actualizado: [backend de gestión, DTO para Flutter, Postman y desplie
 Auditoría del 5 de septiembre: [estado, correcciones y faltantes](docs/auditoria-2026-09-05.md).
 El antiguo objetivo Dart de capa de datos fue retirado. La ampliación del 6 de septiembre incorpora un nuevo [generador Flutter Android con backend protegido, SQLite y GGUF](docs/generacion-flutter-android.md), opcional desde el panel Generación.
 
+Para preparar un ejemplo Android: `npm run demo:mobile`. En la carpeta generada, `.\apk.bat build` crea el APK en `mobile/dist/`; `.\apk.bat install` compila e instala por USB; `.\apk.bat deploy` levanta backend y PostgreSQL con Docker, conecta por USB e instala; `.\apk.bat run --usb` prueba con recarga en caliente y backend iniciado. Cada ZIP incluye `COMANDOS.md` con estas órdenes y sus opciones. El panel Generación también las muestra. En Linux/macOS usar `sh apk.sh`.
+
 ---
 
 ## Arranque rápido
+
+### Aprender a usar el software
+
+Para practicar directamente en la interfaz, abre **Ayuda → Guiarme en esta pantalla**. El recorrido resalta controles reales y muestra instrucciones junto a ellos; detecta escritura y clics, permite ir al control, volver, omitir o pausar con Escape. Continúa cuando navegas de proyectos a una pizarra. **Retomar recorrido interactivo** recupera el último paso guardado para esa pantalla. Puede abrir paneles o pestañas para mostrar controles, pero crear datos, importar y generar requieren acciones del usuario. Los pasos omitidos no certifican que se hayan realizado las operaciones.
+
+El botón **Ayuda** de la barra superior está disponible en Mis proyectos, en cada proyecto, en Mi cuenta y en el editor. Abre una guía con nueve temas: proyectos y pizarras, clases y atributos, relaciones, colaboración, IA, importación/exportación, validación, generación y cuenta. Incluye búsqueda de dudas, instrucciones con los nombres de los controles reales, ejercicios sugeridos y progreso de lectura guardado en este navegador. En el editor abre el tema de edición, importación o generación según el panel activo. Consultar la ayuda no modifica el diagrama ni envía solicitudes a la IA.
+
+### Aprender a usar la IA
+
+En una pizarra, abre **Asistente → Aprender a usar la IA**. La guía interactiva explica Consultar e Instruir, cómo escribir o dictar una solicitud y cómo revisar una propuesta antes de aplicarla. Incluye ejemplos adaptados al diagrama que se cargan como borradores, una práctica sin cambios reales y ayuda para errores frecuentes. No envía solicitudes de IA durante la práctica; recuerda en este navegador cuando completas la guía y permite repasarla. Está disponible en la plataforma web.
 
 ```bash
 # 1. Requisitos: Node 22.15, Docker con Compose v2+
@@ -75,6 +87,11 @@ npm run test:generated # T01: genera, compila con Maven, arranca y ejerce el CRU
 npm run test:bank      # lo mismo sobre los ocho modelos generables del banco
 npm run test:e2e       # dos navegadores contra el entorno levantado
 ```
+
+Las pruebas de dos navegadores esperan el adaptador `mock` en los tres puertos de
+IA (`AI_LLM_PROVIDER`, `AI_VISION_PROVIDER` y `AI_SPEECH_PROVIDER`), como en CI.
+Con un proveedor real gastan tokens y las pruebas del asistente fallan por
+latencia: un proveedor tarda más que los quince segundos que espera la prueba.
 
 Las pruebas de dos navegadores incluyen el paso de la defensa que va del diagrama
 al archivo: dibujar una clase, generar y **comprobar que el ZIP descargado

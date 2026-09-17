@@ -25,12 +25,13 @@ class _LoginState extends State<LoginScreen> {
   final url = TextEditingController(
     text: const String.fromEnvironment(
       'API_BASE_URL',
-      defaultValue: 'http://10.0.2.2:8081',
+      defaultValue: 'http://10.0.2.2:8082',
     ),
   );
   final user = TextEditingController(text: 'admin');
   final password = TextEditingController();
   bool waiting = false;
+  bool useServer = false;
   @override
   void dispose() {
     url.dispose();
@@ -58,13 +59,22 @@ class _LoginState extends State<LoginScreen> {
                 ),
                 const Text('Tu gestion, tambien sin conexion.'),
                 const SizedBox(height: 28),
-                TextField(
-                  controller: url,
-                  decoration: const InputDecoration(
-                    labelText: 'Direccion del backend',
-                  ),
-                  keyboardType: TextInputType.url,
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Conectar a un servidor'),
+                  value: useServer,
+                  onChanged: waiting
+                      ? null
+                      : (value) => setState(() => useServer = value),
                 ),
+                if (useServer)
+                  TextField(
+                    controller: url,
+                    decoration: const InputDecoration(
+                      labelText: 'Direccion del backend',
+                    ),
+                    keyboardType: TextInputType.url,
+                  ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: user,
@@ -85,22 +95,31 @@ class _LoginState extends State<LoginScreen> {
                       : () async {
                           setState(() => waiting = true);
                           try {
-                            await widget.model.login(
-                              url.text,
-                              user.text,
-                              password.text,
-                            );
+                            if (useServer) {
+                              await widget.model.login(
+                                url.text,
+                                user.text,
+                                password.text,
+                              );
+                            } else {
+                              await widget.model.loginLocal(
+                                user.text,
+                                password.text,
+                              );
+                            }
                           } catch (e) {
                             if (context.mounted) showError(context, e);
                           } finally {
                             if (mounted) setState(() => waiting = false);
                           }
                         },
-                  child: Text(waiting ? 'Conectando…' : 'Iniciar sesion'),
+                  child: Text(waiting ? 'Iniciando…' : 'Iniciar sesion'),
                 ),
                 const SizedBox(height: 20),
-                const Text(
-                  'El primer acceso requiere conexion. Despues puedes usar la sesion guardada y los datos locales. Al caducar el acceso remoto se conserva la cola pendiente.',
+                Text(
+                  useServer
+                      ? 'El acceso al servidor requiere conexion. Sus datos se guardan por separado de la cuenta local.'
+                      : 'Acceso sin internet desde la primera instalacion. Usuario: admin · Contraseña: admin. Tus registros se guardan en este dispositivo.',
                 ),
               ],
             ),
@@ -168,11 +187,12 @@ class _HomeState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
-          IconButton(
-            tooltip: 'Sincronizar',
-            onPressed: m.busy ? null : () => m.sync(),
-            icon: const Icon(Icons.sync),
-          ),
+          if (!m.isLocal)
+            IconButton(
+              tooltip: 'Sincronizar',
+              onPressed: m.busy ? null : () => m.sync(),
+              icon: const Icon(Icons.sync),
+            ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -199,7 +219,9 @@ class _HomeState extends State<HomeScreen> with WidgetsBindingObserver {
               child: Row(
                 children: [
                   Icon(
-                    m.queue.isEmpty
+                    m.isLocal
+                        ? Icons.phone_android
+                        : m.queue.isEmpty
                         ? Icons.cloud_done_outlined
                         : Icons.cloud_upload_outlined,
                     size: 20,
@@ -207,7 +229,9 @@ class _HomeState extends State<HomeScreen> with WidgetsBindingObserver {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '${m.queue.length} pendientes · ${m.message}',
+                      m.isLocal
+                          ? 'Sin conexion · Guardado en este dispositivo'
+                          : '${m.queue.length} pendientes · ${m.message}',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -307,7 +331,9 @@ class _HomeState extends State<HomeScreen> with WidgetsBindingObserver {
                                                 final yes = await confirm(
                                                   context,
                                                   'Eliminar $title',
-                                                  'El cambio se guardara localmente y se enviara al sincronizar.',
+                                                  m.isLocal
+                                                      ? 'El cambio se guardara en este dispositivo.'
+                                                      : 'El cambio se guardara localmente y se enviara al sincronizar.',
                                                 );
                                                 if (yes) {
                                                   try {
@@ -348,7 +374,9 @@ class _HomeState extends State<HomeScreen> with WidgetsBindingObserver {
                         'Cuenta y sincronizacion',
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
-                      Text('${m.session!.username}\n${m.session!.url}'),
+                      Text(
+                        '${m.session!.username}\n${m.isLocal ? 'Cuenta local · funciona sin internet' : m.session!.url}',
+                      ),
                       const SizedBox(height: 16),
                       OutlinedButton(
                         onPressed: m.busy
@@ -357,7 +385,9 @@ class _HomeState extends State<HomeScreen> with WidgetsBindingObserver {
                                 if (await confirm(
                                   context,
                                   'Cerrar sesion',
-                                  'Los datos pendientes se conservan para la misma cuenta. El siguiente acceso requiere conexion.',
+                                  m.isLocal
+                                      ? 'Tus registros se conservan. Puedes volver a entrar con admin / admin sin internet.'
+                                      : 'Los datos pendientes se conservan para la misma cuenta. El siguiente acceso al servidor requiere conexion.',
                                 )) {
                                   try {
                                     await m.logout();
@@ -366,55 +396,58 @@ class _HomeState extends State<HomeScreen> with WidgetsBindingObserver {
                                   }
                                 }
                               },
-                        child: const Text('Cerrar sesion / cambiar backend'),
+                        child: const Text('Cerrar sesion / cambiar cuenta'),
                       ),
                       const Divider(),
-                      const Text(
-                        'Para renovar el acceso remoto, vuelve a iniciar sesion con la misma cuenta. Los datos de otra cuenta o servidor se guardan por separado.',
+                      Text(
+                        m.isLocal
+                            ? 'La cuenta local utiliza el modelo incluido en esta app. Sus registros permanecen en este dispositivo y no se envian al servidor.'
+                            : 'Para renovar el acceso remoto, vuelve a iniciar sesion con la misma cuenta. Los datos de otra cuenta o servidor se guardan por separado.',
                       ),
-                      ...m.queue.map(
-                        (q) => Card(
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${q["method"]} ${q["resource"]} · ${q["id"]}',
-                                ),
-                                Text(
-                                  q['message']?.toString() ??
-                                      'Pendiente de confirmacion',
-                                ),
-                                if (q['status'] == 'conflict')
-                                  TextButton(
-                                    onPressed: m.busy
-                                        ? null
-                                        : () async {
-                                            if (await confirm(
-                                              context,
-                                              'Aceptar version del servidor',
-                                              'Se descarta este cambio local rechazado. Los cambios dependientes podrian necesitar correccion.',
-                                            )) {
-                                              try {
-                                                await m.acceptServer(
-                                                  q['operation_id'] as String,
-                                                );
-                                              } catch (e) {
-                                                if (context.mounted)
-                                                  showError(context, e);
-                                              }
-                                            }
-                                          },
-                                    child: const Text(
-                                      'Descartar cambio y aceptar servidor',
-                                    ),
+                      if (!m.isLocal)
+                        ...m.queue.map(
+                          (q) => Card(
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${q["method"]} ${q["resource"]} · ${q["id"]}',
                                   ),
-                              ],
+                                  Text(
+                                    q['message']?.toString() ??
+                                        'Pendiente de confirmacion',
+                                  ),
+                                  if (q['status'] == 'conflict')
+                                    TextButton(
+                                      onPressed: m.busy
+                                          ? null
+                                          : () async {
+                                              if (await confirm(
+                                                context,
+                                                'Aceptar version del servidor',
+                                                'Se descarta este cambio local rechazado. Los cambios dependientes podrian necesitar correccion.',
+                                              )) {
+                                                try {
+                                                  await m.acceptServer(
+                                                    q['operation_id'] as String,
+                                                  );
+                                                } catch (e) {
+                                                  if (context.mounted)
+                                                    showError(context, e);
+                                                }
+                                              }
+                                            },
+                                      child: const Text(
+                                        'Descartar cambio y aceptar servidor',
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ],
@@ -553,7 +586,7 @@ class _RecordFormState extends State<RecordForm> {
           ),
           const SizedBox(height: 16),
           const Text(
-            'Se sincroniza cuando el servidor este disponible. Las claves numericas deben ser unicas; una colision se mostrara como conflicto.',
+            'Los cambios se guardan en el dispositivo. Las claves deben ser unicas. En una cuenta de servidor, se sincronizan cuando este disponible.',
           ),
         ],
       ),
@@ -598,7 +631,7 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
       agent = LocalAgent(loaded);
       speech = LocalSpeech(loaded);
       status =
-          'Selecciona modelos de texto y voz. Puedes escribir sin modelo de voz.';
+          'Elige el origen del texto y de la voz: modelo local importado o IA en linea. Puedes escribir sin voz.';
     } catch (error) {
       status = 'No se pudo abrir la biblioteca: $error';
     } finally {
@@ -632,7 +665,7 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     text.text = transcript;
     status =
-        'Whisper: ${(speech!.lastMilliseconds / 1000).toStringAsFixed(1)} s. Revisa el texto antes de preparar la propuesta.';
+        '${speech!.engineLabel}: ${(speech!.lastMilliseconds / 1000).toStringAsFixed(1)} s. Revisa el texto antes de preparar la propuesta.';
   });
 
   Future<void> cancelDictation() async {
@@ -648,7 +681,7 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(20),
     children: [
-      Text('Asistente local', style: Theme.of(context).textTheme.headlineSmall),
+      Text('Asistente', style: Theme.of(context).textTheme.headlineSmall),
       const Text('Una accion a la vez. Revisa la propuesta antes de guardar.'),
       const SizedBox(height: 16),
       if (library != null)
@@ -676,7 +709,7 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
         spacing: 8,
         children: [
           OutlinedButton.icon(
-            onPressed: busy || library?.speech == null
+            onPressed: busy || !(library?.speechReady ?? false)
                 ? null
                 : () async {
                     if (speech!.recording) {
@@ -698,7 +731,7 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
             label: Text(
               (speech?.recording ?? false)
                   ? 'Parar y transcribir'
-                  : 'Dictar con Whisper',
+                  : 'Dictar',
             ),
           ),
           if (speech?.recording ?? false)
@@ -731,9 +764,9 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
                     if (!context.mounted) return;
                     setState(
                       () => status =
-                          'Texto: ' +
+                          'Texto (${agent!.engineLabel}): ' +
                           (agent!.lastMilliseconds / 1000).toStringAsFixed(1) +
-                          ' s (incluye carga).',
+                          ' s.',
                     );
                     if (proposal.action == 'LIST') {
                       await showDialog<void>(
@@ -814,7 +847,7 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
       ),
       const SizedBox(height: 16),
       const Text(
-        'Los modelos se importan desde tus archivos. Voz y texto se procesan en el dispositivo, sin descargar pesos ni llamar a una API de IA. La transcripcion no ejecuta cambios. Revisa la propuesta; los cambios confirmados se guardan en SQLite y quedan pendientes de sincronizacion.',
+        'Con modelos locales, voz y texto se procesan en el dispositivo sin llamar a ninguna API. Con IA en linea, la instruccion o el audio viajan al proveedor que configuraste con tu clave. En ambos casos la transcripcion no ejecuta cambios y cada propuesta se revisa y confirma antes de guardarse en el dispositivo.',
       ),
     ],
   );

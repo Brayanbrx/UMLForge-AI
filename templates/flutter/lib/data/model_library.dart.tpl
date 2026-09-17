@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
+import 'remote_ai.dart';
 
 enum ModelRuntime { litertlm, gguf, whisper }
 
@@ -39,10 +41,17 @@ class LocalModelFile {
 }
 
 /// Keeps private copies; imports never replace an earlier model.
+///
+/// Tambien decide de donde sale cada capacidad: `textMode` y `speechMode`
+/// eligen entre el modelo importado (local, funciona en modo avion) y la IA en
+/// linea configurada en [remote] con los proveedores de `infra/.env`.
 class ModelLibrary {
+  static const modes = ['local', 'remote'];
   final Directory directory;
   final List<LocalModelFile> models = [];
   String? textId, speechId;
+  String _textMode = 'local', _speechMode = 'local';
+  final RemoteAiSettings remote = RemoteAiSettings.fromBuild();
   final Map<String, Map<String, String>> _settings = {};
   String get backend => _settings[textId]?['backend'] ?? 'cpu';
   set backend(String value) {
@@ -64,6 +73,27 @@ class ModelLibrary {
       throw const FormatException('Idioma invalido');
     if (speechId != null) (_settings[speechId!] ??= {})['language'] = value;
   }
+
+  String get textMode => _textMode;
+  set textMode(String value) {
+    if (!modes.contains(value)) throw const FormatException('Modo invalido');
+    _textMode = value;
+  }
+
+  String get speechMode => _speechMode;
+  set speechMode(String value) {
+    if (!modes.contains(value)) throw const FormatException('Modo invalido');
+    _speechMode = value;
+  }
+
+  bool get textRemote => _textMode == 'remote';
+  bool get speechRemote => _speechMode == 'remote';
+
+  /// Hay con que interpretar texto: modelo importado o IA en linea completa.
+  bool get textReady => textRemote ? remote.textReady : text != null;
+
+  /// Hay con que transcribir: Whisper importado o IA en linea completa.
+  bool get speechReady => speechRemote ? remote.speechReady : speech != null;
 
   static const templates = [
     'chatml',
@@ -97,6 +127,11 @@ class ModelLibrary {
       }
       await library.save();
     }
+    // Las claves de la IA en linea viven en el almacenamiento seguro, no en el
+    // catalogo. Si ese almacenamiento falla, la biblioteca local sigue abriendo.
+    try {
+      await library.remote.load(const FlutterSecureStorage());
+    } catch (_) {}
     return library;
   }
 
@@ -121,6 +156,8 @@ class ModelLibrary {
       ..addAll((j['models'] as List).map((m) => LocalModelFile.fromJson(m)));
     textId = j['textId'];
     speechId = j['speechId'];
+    _textMode = modes.contains(j['textMode']) ? j['textMode'] : 'local';
+    _speechMode = modes.contains(j['speechMode']) ? j['speechMode'] : 'local';
     _settings.clear();
     final stored = j['settings'];
     if (stored is Map) {
@@ -153,6 +190,8 @@ class ModelLibrary {
         'models': models.map((m) => m.toJson()).toList(),
         'textId': textId,
         'speechId': speechId,
+        'textMode': _textMode,
+        'speechMode': _speechMode,
         'backend': backend,
         'template': template,
         'language': language,

@@ -69,6 +69,24 @@ tiempo de carga. La pantalla muestra tiempos: el de texto incluye carga, inferen
 y liberacion; el de voz empieza al finalizar la grabacion. No equivalen a un
 benchmark puro del modelo. La seleccion persiste sin mantener pesos en RAM.
 
+## IA en linea con los proveedores de infra/.env
+
+Los selectores Origen del texto y Origen de la voz cambian entre el modelo
+importado y la IA en linea. Los nombres de variable son los de `infra/.env`
+del generador (`AI_LLM_PROVIDER`, `AI_LLM_MODEL`, `AI_SPEECH_PROVIDER`,
+`AI_SPEECH_MODEL`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`...),
+asi que la configuracion se copia y pega. Se puede incrustar al compilar
+(`mobile/ai.env`, ver README) o escribir en la app, donde queda en el
+almacenamiento seguro del telefono.
+
+El motor en linea recibe exactamente el mismo system prompt y contexto que los
+motores locales, pide salida JSON al proveedor y su respuesta pasa por la misma
+validacion Dart. La voz en linea envia el audio WAV al endpoint de transcripcion
+del proveedor con el idioma elegido y, en Groq, el vocabulario de la coleccion.
+Lo que viaja: la instruccion, los campos y los registros filtrados de la
+coleccion seleccionada, o el audio del dictado. No viaja la contraseña ni el
+resto de la base local.
+
 ## Comparacion reproducible sin modificar datos
 
 Usa los mismos registros locales e instrucciones con cada modelo:
@@ -84,7 +102,7 @@ Anota modelo, CPU/GPU, tiempo, texto reconocido y validez de la propuesta. Cance
 la confirmacion para comparar sin escribir. Luego valida en una base de prueba:
 modo avion, cambio confirmado, cierre/reapertura, reconexion y ausencia de duplicados.
 Las pruebas automaticas usan motores simulados; no acreditan calidad de GGUF,
-LiteRT-LM ni Whisper reales. El primer login requiere acceso al backend.
+LiteRT-LM ni Whisper reales. El login local admin / admin funciona sin internet desde la primera instalación. Solo el login en modo servidor requiere acceso al backend.
 
 La espera para comprobar si el backend es accesible no bloquea las escrituras
 locales del agente ni los formularios. Una vez iniciado el envio de la cola se
@@ -101,8 +119,8 @@ y agrega `apply(from = "../tool/local_models.gradle")` al principio de
 
 ## Limites que siguen abiertos
 
-Esta ampliacion prepara IA local intercambiable. La pasarela a las IA de `infra/.env`
-y Whisper remoto no esta conectada al paquete generado. Flutter sigue usando
+La IA en linea llama al proveedor directamente desde el telefono con tu clave; no
+pasa por el backend Spring ni por la API del generador. Flutter sigue usando
 `/mobile-contract`; no interpreta directamente un OpenAPI arbitrario. La cola
 sincroniza con la app abierta/al reabrir; no existe servicio Android permanente.
 

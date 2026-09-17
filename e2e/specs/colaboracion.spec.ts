@@ -688,8 +688,10 @@ test.describe('importacion y exportacion (M4 y M5)', () => {
 </xmi:XMI>`),
       });
 
+      // Los avisos vienen desplegados: un candidato con avisos plegados se
+      // aplicaba sin leerlos. Pulsar el resumen aqui los cerraria.
       const avisos = escenario.ana.page.getByTestId('avisos-importacion');
-      await escenario.ana.page.getByText(/7 avisos del archivo/i).click();
+      await expect(escenario.ana.page.getByText(/7 avisos del archivo/i)).toBeVisible();
       await expect(avisos).toBeVisible();
 
       // Lo que importa: sin tocar la rueda del raton, la accion se ve.

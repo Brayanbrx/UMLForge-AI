@@ -14,6 +14,7 @@ dependencies:
   path_provider: ^2.1.5
   uuid: ^4.5.2
   crypto: ^3.0.7
+  cryptography: ^2.9.0
   llama_flutter_android: 0.2.6
   litertlm: 0.0.13
   whisper_ggml: 2.6.0

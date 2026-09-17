@@ -2,7 +2,7 @@
 
 ## Qué se adapta sin recompilar
 
-Login por URL de backend, contrato de datos, colecciones, formularios CRUD, claves, relaciones como IDs, cola offline y agente local constituyen la base común. `/mobile-contract` proporciona el modelo al iniciar sesión. Cerrar sesión permite conectar otro backend compatible; cada servidor/cuenta/contrato conserva sus datos separados.
+Login local admin / admin sin internet desde la primera instalación, login opcional por URL de backend, contrato de datos, colecciones, formularios CRUD, claves, relaciones como IDs, cola offline y agente local constituyen la base común. La cuenta local usa el contrato incluido en el APK. En modo servidor, `/mobile-contract` proporciona el modelo al iniciar sesión. Ambos modos mantienen sus datos separados. Cerrar sesión permite conectar otro backend compatible; cada servidor/cuenta/contrato conserva sus datos separados.
 
 El perfil **Android + backend** incluye `/session/login`, `/mobile-contract` y `/mobile-sync`. El ZIP Spring independiente no incluye ese perfil. Un backend Spring escrito por separado puede conectarse si implementa esos endpoints y el mismo protocolo; la base Flutter no interpreta automáticamente cualquier API REST.
 
@@ -37,7 +37,7 @@ Para escribir usar `model.save(resource, dto, create: true/false, expected: orig
 
 ## Desarrollo local
 
-Desde `mobile/`:
+Vía corta, desde la raíz del paquete: `apk.bat install` (Windows) o `sh apk.sh install` compila e instala en el teléfono por USB; `apk.bat run` abre `flutter run` con recarga en caliente; `--api=http://IP:8082` fija la URL inicial del backend. A mano, desde `mobile/`:
 
 ```sh
 dart run tool/start_backend.dart 8082 5435
@@ -46,7 +46,7 @@ flutter pub get
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8082
 ```
 
-El primer comando requiere Docker; crea `backend/.env` con credenciales aleatorias si no existe. Consultar AUTH_USERNAME/AUTH_PASSWORD allí. Si ya existe, se conservan sus puertos y valores. Un teléfono físico usa la IP LAN del equipo, no `10.0.2.2` ni `localhost`. Si un firewall bloquea el puerto de la API, habilitarlo solo en la red de desarrollo necesaria.
+El primer comando es opcional para el modo local. Requiere Docker y crea `backend/.env` con administrador admin / admin y secretos aleatorios de base de datos y firma si no existe. Consultar AUTH_USERNAME/AUTH_PASSWORD allí. Si ya existe, se conservan sus puertos y valores. Un teléfono físico usa la IP LAN del equipo, no `10.0.2.2` ni `localhost`. Si un firewall bloquea el puerto de la API, habilitarlo solo en la red de desarrollo necesaria.
 
 ## Desplegar rápido con Railway
 
@@ -78,7 +78,7 @@ CORS_ALLOWED_ORIGINS=https://gestion.ejemplo.com,http://localhost:5173
 
 Indicar el origen del frontend (protocolo, host y puerto), sin rutas ni comodines. El perfil móvil habilita preflight para CRUD, login, contrato y sincronización, con Content-Type/Authorization. No confundir CORS con autenticación: las rutas de datos continúan requiriendo Bearer token. Esto permite clientes web del backend; el motor GGUF generado sigue destinado a Android.
 
-El APK debug admite HTTP para desarrollo. Para distribución usar HTTPS, configurar una clave de firma propia en Android y construir APK release o AAB; no guardar contraseñas de firma en Git. Subir el backend y distribuir el APK son dos procesos separados. Cambiar solo la URL del backend no exige recompilar porque se introduce en login; cambiar pantallas o permisos nativos sí. No se realiza una publicación externa automáticamente desde el generador.
+El APK debug admite HTTP para desarrollo. `apk.bat release` produce un APK de release con la firma de depuración, suficiente para instalar por USB o compartir el archivo. Para distribución usar HTTPS, configurar una clave de firma propia en Android y construir APK release o AAB; no guardar contraseñas de firma en Git ni claves de IA en el APK que se distribuye. Subir el backend y distribuir el APK son dos procesos separados. Cambiar solo la URL del backend no exige recompilar porque se introduce en login; cambiar pantallas o permisos nativos sí. No se realiza una publicación externa automáticamente desde el generador.
 
 El esquema JPA usa `ddl-auto=update` para facilitar prototipos. Antes de mantener datos reales con cambios de esquema, preparar migraciones versionadas y copias de seguridad. El perfil de login es un administrador compartido; roles, registro y recuperación de cuenta deben añadirse según la aplicación.
 

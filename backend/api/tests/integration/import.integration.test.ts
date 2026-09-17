@@ -353,6 +353,26 @@ describe('importacion y exportacion', () => {
       expect(pizarra.body.snapshot.canonicalJson).toEqual({ classes: [], relationships: [] });
     });
 
+    it('lo que ya esta en la pizarra se omite con aviso en vez de bloquear la lectura', async () => {
+      // El adaptador simulado lee Cliente(nombre) y Pedido(fecha). T01 ya tiene
+      // Cliente con nombre: antes eso cortaba la importacion con una pregunta y
+      // obligaba a repetir la lectura; ahora se conserva lo demas y se avisa.
+      const respuesta = await api.request('POST', `/boards/${boardId}/import/image`, {
+        token: duena.token,
+        body: { image: PNG, mediaType: 'image/png', mode: 'ADD', model: t01 },
+      });
+
+      expect(respuesta.status).toBe(200);
+      expect(respuesta.body.kind).toBe('BATCH');
+      const tipos = respuesta.body.batch.commands.map((c: { type: string }) => c.type);
+      expect(tipos).toEqual(['CREATE_CLASS', 'ADD_ATTRIBUTE', 'CREATE_RELATIONSHIP']);
+      expect(respuesta.body.warnings).toEqual([
+        expect.objectContaining({ element: 'Clase «Cliente»' }),
+        expect.objectContaining({ element: 'Atributo «nombre» de «Cliente»' }),
+      ]);
+      expect(respuesta.body).not.toHaveProperty('skipped');
+    });
+
     it('acepta una imagen del tamano de una foto de movil', async () => {
       // El limite de cuerpo de Fastify es un megabyte por defecto: sin subirlo,
       // esta ruta habria rechazado con un 413 cualquier fotografia real.

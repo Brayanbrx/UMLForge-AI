@@ -5,6 +5,7 @@ import '../domain/assistant_prompt.dart';
 import '../domain/schema.dart';
 import '../domain/proposal.dart';
 import 'model_library.dart';
+import 'remote_ai.dart';
 
 abstract class AgentPort {
   Future<Proposal> propose(
@@ -17,6 +18,8 @@ abstract class AgentPort {
   Future<void> close();
 }
 
+/// Un motor de texto: local (LiteRT-LM, GGUF) o en linea. El agente los trata
+/// igual y valida la respuesta de todos con las mismas reglas.
 abstract class LocalTextEngine {
   Stream<String> generate(String system, String context);
   Future<void> stop();
@@ -128,15 +131,17 @@ class LiteRtTextEngine implements LocalTextEngine {
   Future<void> close() => engine.dispose();
 }
 
+/// `model` es nulo cuando la biblioteca esta en modo en linea.
 typedef TextEngineFactory =
     Future<LocalTextEngine> Function(
       ModelLibrary library,
-      LocalModelFile model,
+      LocalModelFile? model,
     );
 Future<LocalTextEngine> openLocalTextEngine(
   ModelLibrary library,
-  LocalModelFile model,
+  LocalModelFile? model,
 ) async {
+  if (model == null) return RemoteTextEngine.open(library.remote);
   final path = library.file(model).path;
   if (model.runtime == ModelRuntime.litertlm) {
     return LiteRtTextEngine.open(path, library.backend, library.directory.path);
@@ -154,8 +159,12 @@ class LocalAgent implements AgentPort {
   bool _cancelled = false, _closed = false;
   int lastMilliseconds = 0;
   LocalAgent(this.library, {this.factory = openLocalTextEngine});
-  bool get loaded => library.text != null;
+  bool get loaded => library.textReady;
   bool get processing => _active != null;
+
+  /// Como se describe el motor usado en la ultima propuesta.
+  String get engineLabel =>
+      library.textRemote ? 'en linea, ${library.remote.textLabel}' : 'local';
 
   @override
   Future<Proposal> propose(
@@ -166,8 +175,13 @@ class LocalAgent implements AgentPort {
   ) async {
     if (_closed || _active != null)
       throw StateError('Espera a que termine la solicitud');
-    final model = library.text;
-    if (model == null) throw StateError('Selecciona un modelo de texto local');
+    final model = library.textRemote ? null : library.text;
+    if (library.textRemote && !library.remote.textReady)
+      throw StateError(
+        'Configura la IA en linea (proveedor, modelo y clave) o cambia a un modelo local.',
+      );
+    if (!library.textRemote && model == null)
+      throw StateError('Selecciona un modelo de texto local');
     final context = managementContext(instruction, resource, rows);
     final active = Completer<void>();
     _active = active;

@@ -4,7 +4,15 @@ import {
   type UmlAttribute,
   type UmlClass,
 } from '@uml/contracts';
-import { Handle, NodeResizer, Position, type NodeProps, type Node } from '@xyflow/react';
+import {
+  Handle,
+  NodeResizer,
+  Position,
+  useUpdateNodeInternals,
+  type NodeProps,
+  type Node,
+} from '@xyflow/react';
+import { useEffect } from 'react';
 
 export interface ClassNodeData extends Record<string, unknown> {
   readonly umlClass: UmlClass;
@@ -29,7 +37,23 @@ export type ClassNodeType = Node<ClassNodeData, 'umlClass'>;
  * debajo solo cuando difiere. Asi el usuario ve como va a quedar la tabla sin
  * tener que abrir nada, que es donde se detectan las colisiones a simple vista.
  */
-export function ClassNode({ data, selected }: NodeProps<ClassNodeType>): React.JSX.Element {
+export function ClassNode({
+  id,
+  data,
+  selected,
+  width,
+  height,
+}: NodeProps<ClassNodeType>): React.JSX.Element {
+  const updateNodeInternals = useUpdateNodeInternals();
+  useEffect(() => {
+    // El lienzo reconstruye los nodos desde Yjs sin conservar `measured`.
+    // React Flow invalida entonces sus conectores, incluso cuando solo cambia
+    // la presencia. Medimos despues de montar/actualizar esta tarjeta: hacerlo
+    // solo al cambiar los extremos dejaba relaciones remotas sin dibujar.
+    // La seleccion tambien mueve el conector rapido mediante CSS.
+    updateNodeInternals(id);
+  }, [id, data, selected, width, height, updateNodeInternals]);
+
   const { umlClass, primaryKeyId, hasError, hasWarning, isRelationshipSource, editedBy, canWrite } =
     data;
   const tecnicoDistinto = umlClass.codeName !== umlClass.displayName;

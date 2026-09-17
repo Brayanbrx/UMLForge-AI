@@ -16,6 +16,7 @@ class Session {
   final int expiresAt;
   final Map<String, dynamic>? contract;
   final String? refreshToken;
+  final bool isLocal;
   Session(
     this.url,
     this.username,
@@ -23,6 +24,7 @@ class Session {
     this.expiresAt, {
     this.contract,
     this.refreshToken,
+    this.isLocal = false,
   });
   Map<String, dynamic> toJson() => {
     'url': url,
@@ -31,6 +33,7 @@ class Session {
     'expiresAt': expiresAt,
     'contract': contract,
     'refreshToken': refreshToken,
+    'isLocal': isLocal,
   };
   factory Session.fromJson(Map<String, dynamic> j) => Session(
     j['url'],
@@ -39,6 +42,7 @@ class Session {
     j['expiresAt'],
     contract: j['contract'],
     refreshToken: j['refreshToken'],
+    isLocal: j['isLocal'] == true,
   );
 }
 
@@ -174,6 +178,9 @@ class ApiClient implements RemoteApi {
     String path, [
     Map<String, dynamic>? body,
   ]) async {
+    if (session?.isLocal == true) {
+      throw ApiFailure(403, 'La cuenta local no tiene acceso al servidor');
+    }
     final epoch = _sessionEpoch;
     await flushLogouts();
     _checkSession(epoch);

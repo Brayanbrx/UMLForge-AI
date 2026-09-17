@@ -194,6 +194,16 @@ export function ProjectsPage(): React.JSX.Element {
 /** Pizarras del proyecto e invitaciones (RF-002, RF-A05). */
 export function ProjectPage(): React.JSX.Element {
   const { projectId } = useParams<{ projectId: string }>();
+  // Una ruta nueva necesita su propio estado: una respuesta o invitacion del
+  // proyecto anterior no debe aparecer ni operar bajo la nueva direccion.
+  return <ProjectSession key={projectId} projectId={projectId} />;
+}
+
+function ProjectSession({
+  projectId,
+}: {
+  readonly projectId: string | undefined;
+}): React.JSX.Element {
   const { user, logout } = useSession();
   const { error, pending, run } = useAsyncAction();
   const [proyecto, setProyecto] = useState<ProjectDetail | null>(null);

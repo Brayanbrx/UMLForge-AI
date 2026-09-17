@@ -8,7 +8,10 @@ afterEach(async () => {
 });
 
 it('recibir el POST completo no cancela; cerrar el cliente mientras espera sí cancela', async () => {
-  const app = Fastify();
+  // Sin forzar el cierre, Fastify espera unos cuatro segundos a la conexion que
+  // el cliente abandono, y la prueba entera rozaba el limite de cinco: pasaba
+  // aislada y fallaba con la suite completa en una maquina cargada.
+  const app = Fastify({ forceCloseConnections: true });
   servers.push(app);
   let captured: AbortSignal | undefined;
   app.post('/', (request, reply) =>
@@ -33,7 +36,7 @@ it('recibir el POST completo no cancela; cerrar el cliente mientras espera sí c
   controller.abort();
   await response;
   await vi.waitFor(() => expect(captured?.aborted).toBe(true));
-});
+}, 15_000);
 
 it('una respuesta normal libera listeners sin marcar cancelación', async () => {
   const app = Fastify();

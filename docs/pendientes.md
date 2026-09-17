@@ -22,8 +22,10 @@ La evidencia y los defectos corregidos están en la
 del 30 de agosto; la historia de propuestas permanece en
 [actualizacion.md](actualizacion.md) y en Git.
 
-El alcance ejecutable actual es la web colaborativa y el generador Spring Boot.
-La web se adapta a teléfonos; el cliente nativo y la generación Dart fueron retirados.
+El alcance ejecutable actual es la web colaborativa, el generador Spring Boot y,
+desde el 6 de septiembre, el paquete opcional Flutter Android con su backend
+protegido. La web se adapta a teléfonos; el antiguo generador Dart de capa de
+datos fue retirado.
 
 ## Antes de cerrar la entrega
 

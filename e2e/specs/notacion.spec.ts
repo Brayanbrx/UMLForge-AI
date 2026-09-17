@@ -89,6 +89,14 @@ test.describe('notacion del diagrama', () => {
       await escenario.ana.page.getByTestId('rol-destino').fill('subordinados');
       await expect(bucle.locator('text.rol-asociacion')).toHaveText(['jefe', 'subordinados']);
 
+      const bucleRemoto = escenario.beto.page.locator('[data-relationship-kind="ASSOCIATION"]');
+      for (const rol of ['coordinador', 'responsable', 'jefe']) {
+        await escenario.ana.page.getByTestId('rol-origen').fill(rol);
+        await expect(bucleRemoto.locator('text.rol-asociacion')).toHaveText([rol, 'subordinados']);
+        await escenario.beto.page.getByTestId('clase-Materia').click();
+        await expect(bucleRemoto).toBeVisible();
+      }
+
       // Es un bucle ortogonal de tres segmentos, no una linea que atraviesa la
       // caja ni una arista de longitud cero.
       await expect(bucle.locator('path.asociacion-linea')).toHaveAttribute(

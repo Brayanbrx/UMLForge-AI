@@ -12,3 +12,7 @@ templates/
 .claude/
 test-results/
 playwright-report/
+generated-output/
+output/
+tmp/
+temp/

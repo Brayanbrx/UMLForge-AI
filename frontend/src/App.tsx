@@ -5,6 +5,7 @@ import { ProfilePage } from './features/auth/ProfilePage.js';
 import { ResetPage } from './features/auth/ResetPage.js';
 import { SessionProvider, useSession } from './features/auth/session.js';
 import { ProjectPage, ProjectsPage } from './features/projects/ProjectsPage.js';
+import { InteractiveTourProvider } from './features/help/InteractiveTour.js';
 
 const BoardPage = lazy(async () => {
   const { BoardPage } = await import('./features/editor/BoardPage.js');
@@ -15,15 +16,17 @@ export function App(): React.JSX.Element {
   return (
     <SessionProvider>
       <BrowserRouter>
-        <Suspense
-          fallback={
-            <main className="centrado" role="status">
-              Cargando la aplicación…
-            </main>
-          }
-        >
-          <Rutas />
-        </Suspense>
+        <InteractiveTourProvider>
+          <Suspense
+            fallback={
+              <main className="centrado" role="status">
+                Cargando la aplicación…
+              </main>
+            }
+          >
+            <Rutas />
+          </Suspense>
+        </InteractiveTourProvider>
       </BrowserRouter>
     </SessionProvider>
   );

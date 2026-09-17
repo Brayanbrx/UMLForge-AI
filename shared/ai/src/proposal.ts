@@ -146,6 +146,29 @@ export type AssistantOperation = z.infer<typeof assistantOperationSchema>;
  */
 export const MAX_PROPOSAL_OPERATIONS = 200;
 
+/**
+ * Una modificacion que no modifica nada.
+ *
+ * Se comprueba aparte del esquema de cada operacion porque el rescate de una
+ * propuesta defectuosa filtra operacion por operacion, y una de estas pasaria
+ * el filtro y haria fallar el lote entero al final.
+ */
+export function esOperacionVacia(operation: AssistantOperation): boolean {
+  if (operation.op === 'UPDATE_ATTRIBUTE') {
+    return (
+      operation.newName === undefined &&
+      operation.type === undefined &&
+      operation.primaryKey === undefined &&
+      operation.required === undefined &&
+      operation.unique === undefined
+    );
+  }
+  if (operation.op === 'CHANGE_MULTIPLICITY') {
+    return operation.fromMultiplicity === undefined && operation.toMultiplicity === undefined;
+  }
+  return false;
+}
+
 export const batchProposalSchema = z
   .object({
     operations: z.array(assistantOperationSchema).max(MAX_PROPOSAL_OPERATIONS),
@@ -164,18 +187,7 @@ export const batchProposalSchema = z
   })
   .superRefine((proposal, ctx) => {
     proposal.operations.forEach((operation, index) => {
-      const emptyUpdate =
-        operation.op === 'UPDATE_ATTRIBUTE' &&
-        operation.newName === undefined &&
-        operation.type === undefined &&
-        operation.primaryKey === undefined &&
-        operation.required === undefined &&
-        operation.unique === undefined;
-      const emptyMultiplicity =
-        operation.op === 'CHANGE_MULTIPLICITY' &&
-        operation.fromMultiplicity === undefined &&
-        operation.toMultiplicity === undefined;
-      if (emptyUpdate || emptyMultiplicity)
+      if (esOperacionVacia(operation))
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['operations', index],

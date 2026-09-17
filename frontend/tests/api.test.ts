@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  api,
   apiRequest,
   currentAccessToken,
   setAccessToken,
@@ -87,6 +88,35 @@ describe('cliente HTTP', () => {
     await exiting;
     await expect(refresh).resolves.toBe(false);
     expect(currentAccessToken()).toBeNull();
+  });
+
+  it('mantiene la sesion y envia la auditoria si acceder a localStorage lanza SecurityError', async () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    const userId = crypto.randomUUID();
+    const batch = auditBatch(userId);
+    const fetchMock = vi.fn(async (input: string) =>
+      jsonResponse(200, input.endsWith('/refresh') ? session(userId) : { batchId: batch.batchId }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('Almacenamiento bloqueado', 'SecurityError');
+      },
+    });
+    try {
+      expect(pendingAuditCount()).toBe(0);
+      await expect(refreshSession()).resolves.toBe(true);
+      expect(currentAccessToken()).toBe(`token-${userId}`);
+      await expect(api.recordBatch('pizarra', batch)).resolves.toEqual({ batchId: batch.batchId });
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/boards/pizarra/audit',
+        expect.objectContaining({ method: 'POST', body: JSON.stringify(batch) }),
+      );
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'localStorage', original);
+      else Reflect.deleteProperty(globalThis, 'localStorage');
+    }
   });
 
   it('no reintenta una escritura con otra cuenta al cambiar la cookie en otra pestana', async () => {

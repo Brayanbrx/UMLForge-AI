@@ -92,11 +92,15 @@ export async function importRoutes(
       }),
     );
 
-    const outcome = resolveProposal({
+    // Tolerante: la lectura ya se pago. Lo que no se pueda resolver —una clase
+    // que ya estaba, una duda que el modelo dejo escrita— se omite y viaja como
+    // aviso con el candidato, en vez de tirar todo y obligar a otra lectura.
+    const { skipped = [], ...outcome } = resolveProposal({
       proposal: conBorradoPrevio(proposal, body.mode, body.model),
       model: body.model,
       actorId: userId,
       origin: 'IMAGE',
+      tolerante: true,
     });
 
     request.log.info(
@@ -107,6 +111,7 @@ export async function importRoutes(
         latencyMs: usage?.latencyMs,
         outcome: outcome.kind,
         operations: proposal.operations.length,
+        skipped: skipped.length,
       },
       'importacion por imagen',
     );
@@ -115,17 +120,20 @@ export async function importRoutes(
     // mas de lo que cabe en una propuesta. Se avisa en lugar de entregar un
     // modelo incompleto con aspecto de completo: quien importa un diagrama de
     // ocho tablas no puede tener que contar los atributos para descubrirlo.
-    const warnings = pareceTruncada(proposal)
-      ? [
-          {
-            element: 'la fotografia',
-            reason:
-              `La lectura alcanzo el maximo de ${MAX_PROPOSAL_OPERATIONS} operaciones, ` +
-              'asi que puede faltar contenido. Revisa el candidato antes de aplicarlo, y si ' +
-              'el diagrama es muy grande, importalo por partes.',
-          },
-        ]
-      : [];
+    const warnings = [
+      ...skipped,
+      ...(pareceTruncada(proposal)
+        ? [
+            {
+              element: 'la fotografia',
+              reason:
+                `La lectura alcanzo el maximo de ${MAX_PROPOSAL_OPERATIONS} operaciones, ` +
+                'asi que puede faltar contenido. Revisa el candidato antes de aplicarlo, y si ' +
+                'el diagrama es muy grande, importalo por partes.',
+            },
+          ]
+        : []),
+    ];
 
     return { ...outcome, rationale: proposal.rationale ?? null, warnings };
   });

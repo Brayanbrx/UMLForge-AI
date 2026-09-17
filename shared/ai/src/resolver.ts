@@ -26,7 +26,22 @@ import type { AssistantOperation, BatchProposal } from './proposal.js';
  *
  * Y el modelo nunca produce identificadores: aqui es donde los nombres que
  * devolvio se buscan contra el modelo real.
+ *
+ * **Dos regimenes.** El asistente por texto es atomico: si una operacion no se
+ * puede resolver, se pregunta y no se aplica nada, porque la persona pidio una
+ * cosa concreta. La importacion de una fotografia es lo contrario: la lectura
+ * ya costo una llamada al proveedor, produce decenas de operaciones y termina en
+ * un candidato editable. Tirar sesenta operaciones buenas porque una clase ya
+ * existia —o porque el modelo dejo una duda escrita— obliga a pagar otra
+ * lectura para llegar al mismo sitio. En modo `tolerante` lo irresoluble se
+ * omite y se devuelve como aviso, y el resto sigue adelante.
  */
+
+/** Una operacion que el modo tolerante dejo fuera, y por que. */
+export interface SkippedOperation {
+  readonly element: string;
+  readonly reason: string;
+}
 
 export type ResolutionOutcome =
   /** Todo resuelto. El lote esta listo para aplicarse. */
@@ -34,12 +49,15 @@ export type ResolutionOutcome =
       readonly kind: 'BATCH';
       readonly batch: CommandBatch;
       readonly summary: readonly string[];
+      /** Solo en modo tolerante: lo que se omitio para no cortar la lectura. */
+      readonly skipped?: readonly SkippedOperation[];
     }
   /** Falta algo que solo el usuario puede decidir (RF-034). */
   | {
       readonly kind: 'QUESTION';
       readonly question: string;
       readonly options?: readonly string[];
+      readonly skipped?: readonly SkippedOperation[];
     }
   /** Resuelto, pero destruye demasiado como para hacerlo sin preguntar (RF-035). */
   | {
@@ -47,11 +65,13 @@ export type ResolutionOutcome =
       readonly question: string;
       readonly batch: CommandBatch;
       readonly summary: readonly string[];
+      readonly skipped?: readonly SkippedOperation[];
     }
   /** El lote resultante no se puede aplicar. */
   | {
       readonly kind: 'REJECTED';
       readonly issues: readonly ValidationIssue[];
+      readonly skipped?: readonly SkippedOperation[];
     };
 
 export interface ResolveOptions {
@@ -59,6 +79,14 @@ export interface ResolveOptions {
   readonly model: SemanticModel;
   readonly actorId: string;
   readonly origin: BatchOrigin;
+  /**
+   * Omite lo que no se pueda resolver en vez de detenerse en la primera duda.
+   *
+   * Para la importacion, donde la propuesta ya se pago y el resultado es un
+   * candidato que la persona revisa. El asistente por texto no lo usa: alli una
+   * instruccion a medias es peor que una pregunta.
+   */
+  readonly tolerante?: boolean;
   /** Inyectable para que las pruebas sean deterministas. */
   readonly newId?: () => string;
   readonly now?: () => Date;
@@ -75,18 +103,28 @@ const DESTRUCTIVE_THRESHOLD = 1;
 
 export function resolveProposal(options: ResolveOptions): ResolutionOutcome {
   const { proposal, model } = options;
+  const tolerante = options.tolerante === true;
   const newId = options.newId ?? (() => crypto.randomUUID());
   const issuedAt = (options.now ?? (() => new Date()))().toISOString();
+  const skipped: SkippedOperation[] = [];
+  const conOmitidos = <T extends ResolutionOutcome>(outcome: T): T =>
+    tolerante ? { ...outcome, skipped } : outcome;
 
   if (proposal.needsClarification !== undefined) {
-    return { kind: 'QUESTION', question: proposal.needsClarification };
+    // Con operaciones delante, la duda del modelo es una nota sobre lo que
+    // transcribio, no un motivo para tirar la transcripcion. Se entrega como
+    // aviso junto al candidato; sin operaciones, sigue siendo una pregunta.
+    if (!tolerante || proposal.operations.length === 0) {
+      return conOmitidos({ kind: 'QUESTION', question: proposal.needsClarification });
+    }
+    skipped.push({ element: 'la lectura', reason: proposal.needsClarification });
   }
 
   if (proposal.operations.length === 0) {
-    return {
+    return conOmitidos({
       kind: 'QUESTION',
       question: 'No entendi que cambio hacer en la pizarra. ¿Puedes decirlo de otra forma?',
-    };
+    });
   }
 
   const commands: Command[] = [];
@@ -106,9 +144,14 @@ export function resolveProposal(options: ResolveOptions): ResolutionOutcome {
       issuedAt,
       actorId: options.actorId,
       origin: options.origin,
+      tolerante,
     });
 
-    if (resultado.kind === 'QUESTION') return resultado;
+    if (resultado.kind === 'QUESTION') {
+      if (!tolerante) return resultado;
+      skipped.push({ element: describirOperacion(operation), reason: resultado.question });
+      continue;
+    }
 
     const planned = planBatch(preview, {
       batchId: 'preview',
@@ -117,12 +160,33 @@ export function resolveProposal(options: ResolveOptions): ResolutionOutcome {
       issuedAt,
       commands: resultado.commands,
     });
-    if (!planned.applied) return { kind: 'REJECTED', issues: planned.issues };
+    if (!planned.applied) {
+      if (!tolerante) return { kind: 'REJECTED', issues: planned.issues };
+      skipped.push({
+        element: describirOperacion(operation),
+        reason: planned.issues.map((issue) => issue.message).join(' '),
+      });
+      continue;
+    }
     preview = planned.state;
 
     commands.push(...resultado.commands);
     summary.push(resultado.summary);
     destruccion += resultado.destroys;
+  }
+
+  if (commands.length === 0) {
+    // Todo se omitio: no hay candidato que ensenar. Se dice por que en vez de
+    // devolver un lote vacio con aspecto de exito.
+    return conOmitidos({
+      kind: 'QUESTION',
+      question:
+        'Ninguna de las operaciones leidas se pudo preparar. ' +
+        skipped
+          .slice(0, 3)
+          .map((omitida) => `${omitida.element}: ${omitida.reason}`)
+          .join(' '),
+    });
   }
 
   const batch: CommandBatch = {
@@ -140,19 +204,37 @@ export function resolveProposal(options: ResolveOptions): ResolutionOutcome {
     batch,
   );
   if (!outcome.applied) {
-    return { kind: 'REJECTED', issues: outcome.issues };
+    return conOmitidos({ kind: 'REJECTED', issues: outcome.issues });
   }
 
   if (destruccion > DESTRUCTIVE_THRESHOLD) {
-    return {
+    return conOmitidos({
       kind: 'CONFIRMATION',
       question: `Esto elimina ${destruccion} elementos. ¿Confirmas?`,
       batch,
       summary,
-    };
+    });
   }
 
-  return { kind: 'BATCH', batch, summary };
+  return conOmitidos({ kind: 'BATCH', batch, summary });
+}
+
+/** Como se nombra una operacion omitida en el aviso que la sustituye. */
+function describirOperacion(operation: AssistantOperation): string {
+  switch (operation.op) {
+    case 'CREATE_CLASS':
+    case 'RENAME_CLASS':
+    case 'DELETE_CLASS':
+      return `Clase «${operation.className}»`;
+    case 'ADD_ATTRIBUTE':
+    case 'UPDATE_ATTRIBUTE':
+    case 'DELETE_ATTRIBUTE':
+      return `Atributo «${operation.attributeName}» de «${operation.className}»`;
+    case 'CREATE_RELATIONSHIP':
+    case 'CHANGE_MULTIPLICITY':
+    case 'DELETE_RELATIONSHIP':
+      return `Relacion «${operation.fromClass}» — «${operation.toClass}»`;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -166,6 +248,7 @@ interface OperationContext {
   readonly issuedAt: string;
   readonly actorId: string;
   readonly origin: BatchOrigin;
+  readonly tolerante: boolean;
 }
 
 type OperationOutcome =
@@ -181,7 +264,9 @@ function resolveOperation(context: OperationContext): OperationOutcome {
       if (existente.length > 0) {
         return {
           kind: 'QUESTION',
-          question: `Ya existe una clase que se llama «${existente[0]?.displayName}». ¿Querias otra cosa?`,
+          question: context.tolerante
+            ? `Ya existe «${existente[0]?.displayName}» en la pizarra; se conserva la que hay y sus atributos nuevos se anaden a ella.`
+            : `Ya existe una clase que se llama «${existente[0]?.displayName}». ¿Querias otra cosa?`,
         };
       }
 
@@ -247,7 +332,9 @@ function resolveOperation(context: OperationContext): OperationOutcome {
       if (yaEsta !== undefined) {
         return {
           kind: 'QUESTION',
-          question: `«${operation.className}» ya tiene un atributo «${yaEsta.displayName}». ¿Lo cambio en lugar de anadirlo?`,
+          question: context.tolerante
+            ? `«${operation.className}» ya tiene «${yaEsta.displayName}»; no se duplica.`
+            : `«${operation.className}» ya tiene un atributo «${yaEsta.displayName}». ¿Lo cambio en lugar de anadirlo?`,
         };
       }
 

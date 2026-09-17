@@ -22,6 +22,7 @@ import { gui, makeBatch, newId, type CommandBody } from './commands.js';
 import { isRelationshipTool, relationshipKindFor, type EditorTool } from './editor-tools.js';
 import { useBoardDocument } from './useBoardDocument.js';
 import { ThemeSelect } from '../../components/ThemeProvider.js';
+import { SoftwareGuide } from '../help/SoftwareGuide.js';
 
 type Herramienta = 'asistente' | 'importar' | 'generar';
 
@@ -177,6 +178,8 @@ function BoardSession({ boardId }: { readonly boardId: string }): React.JSX.Elem
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       const target = event.target as HTMLElement | null;
+      // A modal owns keyboard interaction, including Escape and tool shortcuts.
+      if (target?.closest('dialog[open], [data-tour-ui]')) return;
       if (
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
@@ -336,6 +339,15 @@ function BoardSession({ boardId }: { readonly boardId: string }): React.JSX.Elem
         </div>
 
         <div className="separa" />
+        <SoftwareGuide
+          topic={
+            herramienta === 'generar'
+              ? 'generation'
+              : herramienta === 'importar'
+                ? 'import'
+                : 'diagram'
+          }
+        />
         <ThemeSelect />
 
         <div className="estado-barra" role="status" aria-live="polite">

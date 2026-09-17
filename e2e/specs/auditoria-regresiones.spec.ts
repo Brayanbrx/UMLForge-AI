@@ -36,7 +36,7 @@ test('actualiza permisos de participantes inactivos y permite recuperar el rol e
     await expect(escenario.beto.page.getByTestId('crear-clase')).toBeDisabled();
     await expect(escenario.beto.page.getByTestId('solo-lectura')).toBeVisible();
     await expect(escenario.beto.page.getByTestId('aviso-permisos')).toContainText(
-      'no se guardaron',
+      'no se enviará sin permiso de edición',
     );
     await expect(escenario.beto.page.getByTestId('clase-Cliente')).toBeVisible();
     await permisos(escenario, 'EDITOR');

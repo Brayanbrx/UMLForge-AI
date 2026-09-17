@@ -2,13 +2,31 @@ import 'dart:convert';
 import 'schema.dart';
 import 'package:uuid/uuid.dart';
 
+/// Quita el bloque de codigo Markdown que algunos modelos ponen alrededor del
+/// JSON aunque se les pida lo contrario. Solo eso: cualquier otro texto extra
+/// sigue siendo una respuesta fuera del contrato.
+String stripCodeFence(String response) {
+  final text = response.trim();
+  final match = RegExp(
+    r'^```[a-zA-Z]*\s*([\s\S]*?)\s*```$',
+  ).firstMatch(text);
+  return match == null ? text : match.group(1)!.trim();
+}
+
 class Proposal {
   final String action, resource;
   final dynamic id;
   final Map<String, dynamic>? data;
   Proposal(this.action, this.resource, this.id, this.data);
   factory Proposal.parse(String response, AppSchema schema) {
-    final value = jsonDecode(response.trim());
+    final dynamic value;
+    try {
+      value = jsonDecode(stripCodeFence(response));
+    } on FormatException {
+      throw const FormatException(
+        'La respuesta del modelo no es JSON. Repite la instruccion o cambia de modelo.',
+      );
+    }
     if (value is! Map ||
         value.keys.any(
           (k) => !['action', 'resource', 'id', 'data', 'question'].contains(k),

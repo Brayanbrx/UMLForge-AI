@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { avatarUrl } from '../lib/api.js';
 import { ThemeSelect } from './ThemeProvider.js';
+import { SoftwareGuide } from '../features/help/SoftwareGuide.js';
 import { IconoChevron, IconoDiagrama, IconoSalir, IconoProyecto } from './icons.js';
 
 /**
@@ -43,6 +44,7 @@ export function AppBar({
       </Link>
 
       <div className="separa" />
+      <SoftwareGuide />
       <ThemeSelect />
 
       <MenuUsuario

@@ -137,8 +137,9 @@ export function GenerationPanel({
       </label>
       {includeMobile && (
         <p className="aviso">
-          El paquete incluye su backend con autenticación. Los modelos de texto y voz se cargan
-          después en el teléfono.
+          El ZIP incluye Flutter, su backend y comandos para compilar el APK e instalarlo por USB.
+          Necesitas Flutter y Android SDK en la PC. Los modelos de texto y voz se cargan después en
+          el teléfono.
         </p>
       )}
       <button
@@ -182,6 +183,38 @@ export function GenerationPanel({
         <p className="aviso" data-testid="estado-generacion">
           {estado}
         </p>
+      )}
+      {(includeMobile || ultimoMobile || historial.some((g) => g.mobileSha256)) && (
+        <details className="aviso" data-testid="comandos-android">
+          <summary>Compilar APK y probar en el celular</summary>
+          <p>
+            Extrae Android + backend y abre PowerShell en esa carpeta. Activa Depuración USB en el
+            celular, conecta el cable y acepta la autorización en su pantalla.
+          </p>
+          <ul>
+            <li>
+              <code>.\apk.bat doctor</code> — comprobar Flutter, Android SDK y dispositivos.
+            </li>
+            <li>
+              <code>.\apk.bat build</code> — crear el APK en <code>mobile/dist/</code>.
+            </li>
+            <li>
+              <code>.\apk.bat install</code> — compilar, instalar y abrir la app.
+            </li>
+            <li>
+              <code>.\apk.bat deploy</code> — levantar backend con Docker e instalar con conexión
+              USB.
+            </li>
+            <li>
+              <code>.\apk.bat run --usb</code> — probar con recarga en caliente y backend ya
+              iniciado.
+            </li>
+          </ul>
+          <p>
+            La app funciona sin servidor con admin / admin. Para usar el backend, activa Conectar a
+            un servidor en el login. En Linux/macOS usa <code>sh apk.sh</code>.
+          </p>
+        </details>
       )}
       {error !== null && (
         <p className="error" data-testid="error-generacion">

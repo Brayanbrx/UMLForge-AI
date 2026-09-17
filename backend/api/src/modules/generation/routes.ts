@@ -194,6 +194,14 @@ export async function generationRoutes(
     const { target } = downloadQuery.parse(request.query ?? {});
     const { userId } = currentUser(request);
 
+    // Marcar una emision interrumpida escribe en el proyecto. La autorizacion
+    // debe comprobarse antes, incluso si finalmente se rechaza la descarga.
+    const access = await app.prisma.generation.findUnique({
+      where: { id: generationId },
+      select: { board: { select: { projectId: true } } },
+    });
+    if (access === null) throw notFound('La generacion no existe.');
+    await requireMembership(app.prisma, access.board.projectId, userId);
     await marcarInterrumpidas(app, { generationId });
 
     const generation = await app.prisma.generation.findUnique({
@@ -213,8 +221,6 @@ export async function generationRoutes(
     });
 
     if (generation === null) throw notFound('La generacion no existe.');
-    await requireMembership(app.prisma, generation.board.projectId, userId);
-
     if (generation.status !== 'READY') {
       throw new HttpError(
         409,

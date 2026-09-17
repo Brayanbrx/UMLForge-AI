@@ -372,6 +372,20 @@ describe('generacion desde la pizarra y auditoria', () => {
         },
       });
 
+      const rechazada = await api.request('GET', `/generations/${interrumpida.id}/download`, {
+        token: extrano.token,
+      });
+      expect(rechazada.status).toBe(404);
+      expect(
+        await api.app.prisma.generation.findUnique({ where: { id: interrumpida.id } }),
+      ).toMatchObject({ status: 'CREATING', error: null });
+
+      const descarga = await api.request('GET', `/generations/${interrumpida.id}/download`, {
+        token: duena.token,
+      });
+      expect(descarga.status).toBe(409);
+      expect(descarga.body.error.message).toContain('se interrumpio');
+
       const historial = await api.request('GET', `/boards/${boardId}/generations`, {
         token: duena.token,
       });

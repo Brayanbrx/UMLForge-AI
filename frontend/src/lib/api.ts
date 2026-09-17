@@ -509,8 +509,9 @@ async function performAuditFlush(): Promise<void> {
 }
 
 function readAuditQueue(): PendingAudit[] {
-  if (typeof localStorage === 'undefined') return [];
   try {
+    // El propio getter puede lanzar SecurityError cuando el navegador bloquea storage.
+    if (typeof localStorage === 'undefined') return [];
     const parsed: unknown = JSON.parse(localStorage.getItem(AUDIT_QUEUE_KEY) ?? '[]');
     if (!Array.isArray(parsed)) return [];
 
@@ -528,8 +529,8 @@ function readAuditQueue(): PendingAudit[] {
 }
 
 function writeAuditQueue(items: readonly PendingAudit[]): void {
-  if (typeof localStorage === 'undefined') return;
   try {
+    if (typeof localStorage === 'undefined') return;
     localStorage.setItem(AUDIT_QUEUE_KEY, JSON.stringify(items));
     for (const listener of auditQueueListeners) listener(pendingAuditCount());
   } catch {

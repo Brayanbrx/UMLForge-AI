@@ -4,6 +4,16 @@ import 'dart:math';
 
 /// Run from mobile/: dart run tool/start_backend.dart [apiPort] [databasePort]
 Future<void> main(List<String> args) async {
+  try {
+    final port = await startBackend(args);
+    stdout.writeln('Backend listo: http://127.0.0.1:$port');
+  } on Exception catch (error) {
+    stderr.writeln(error);
+    exitCode = 1;
+  }
+}
+
+Future<int> startBackend(List<String> args) async {
   if (args.length > 2)
     throw ArgumentError('Uso: dart run tool/start_backend.dart [8082] [5435]');
   final apiPort = int.parse(args.isEmpty ? '8082' : args[0]);
@@ -43,10 +53,36 @@ Future<void> main(List<String> args) async {
   }
   final process = await Process.start(
     'docker',
-    ['compose', 'up', '-d', '--build'],
+    ['compose', 'up', '-d', '--build', '--wait', '--wait-timeout', '180'],
     workingDirectory: root.path,
     mode: ProcessStartMode.inheritStdio,
     runInShell: Platform.isWindows,
   );
-  exitCode = await process.exitCode;
+  final code = await process.exitCode;
+  if (code != 0) {
+    throw ProcessException(
+      'docker',
+      ['compose', 'up'],
+      'El backend no esta listo. Revisa docker compose logs en backend/.',
+      code,
+    );
+  }
+  // Consultar el puerto publicado real: respeta .env y el entorno de Compose.
+  final published = await Process.run(
+    'docker',
+    ['compose', 'port', 'api', '8080'],
+    workingDirectory: root.path,
+    runInShell: Platform.isWindows,
+  );
+  final port = published.exitCode == 0
+      ? int.tryParse(
+          published.stdout.toString().trim().split('\n').first.split(':').last,
+        )
+      : null;
+  if (port == null || port < 1 || port > 65535) {
+    throw StateError(
+      'No se pudo obtener el puerto del backend con docker compose port api 8080.',
+    );
+  }
+  return port;
 }

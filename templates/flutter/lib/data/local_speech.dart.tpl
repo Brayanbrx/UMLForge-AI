@@ -6,9 +6,17 @@ import 'package:whisper_ggml/whisper_ggml.dart';
 import '../domain/assistant_prompt.dart';
 import '../domain/schema.dart';
 import 'model_library.dart';
+import 'remote_ai.dart';
 
 typedef LocalTranscriber =
     Future<String> Function(TranscribeRequest request, String modelPath);
+typedef RemoteTranscriber =
+    Future<String> Function(
+      String audioPath,
+      String language,
+      String vocabulary,
+      RemoteAiSettings settings,
+    );
 Future<String> transcribeWhisperFile(
   TranscribeRequest request,
   String modelPath,
@@ -20,16 +28,20 @@ Future<String> transcribeWhisperFile(
   return result.text;
 }
 
-/// Explicit local path: no initModel or automatic downloads.
+/// Graba el dictado y lo transcribe con el Whisper importado o, si la
+/// biblioteca esta en modo en linea, con el proveedor de voz configurado.
+/// En ambos casos el audio temporal se borra y el texto nunca ejecuta nada.
 class LocalSpeech {
   final ModelLibrary library;
   final AudioRecorder recorder;
   final LocalTranscriber transcribe;
+  final RemoteTranscriber transcribeRemote;
   final Future<Directory> Function() temporaryDirectory;
   LocalSpeech(
     this.library, {
     AudioRecorder? recorder,
     this.transcribe = transcribeWhisperFile,
+    this.transcribeRemote = transcribeRemoteAudio,
     this.temporaryDirectory = getTemporaryDirectory,
   }) : recorder = recorder ?? AudioRecorder();
   bool recording = false;
@@ -42,6 +54,12 @@ class LocalSpeech {
   int lastMilliseconds = 0;
   bool get capturing => recording || _starting != null;
   bool get transcribing => _transcribing != null;
+
+  /// Como se describe el transcriptor usado en la ultima transcripcion.
+  String get engineLabel => library.speechRemote
+      ? 'Voz en linea (${library.remote.speechLabel})'
+      : 'Whisper';
+
   Future<void> start(void Function() onLimit) async {
     if (_closed || recording || _starting != null || _transcribing != null)
       throw StateError('La grabacion ya esta activa');
@@ -54,11 +72,18 @@ class LocalSpeech {
     }
 
     try {
-      final model = library.speech;
-      if (model == null || !await library.file(model).exists()) {
-        throw StateError(
-          'Importa y selecciona primero un Whisper multilingue .bin',
-        );
+      if (library.speechRemote) {
+        if (!library.remote.speechReady)
+          throw StateError(
+            'Configura la voz en linea (groq o mistral, modelo y clave) o cambia a Whisper local.',
+          );
+      } else {
+        final model = library.speech;
+        if (model == null || !await library.file(model).exists()) {
+          throw StateError(
+            'Importa y selecciona primero un Whisper multilingue .bin',
+          );
+        }
       }
       check();
       if (!await recorder.hasPermission())
@@ -90,12 +115,12 @@ class LocalSpeech {
   Future<String> finish(ResourceSpec resource) async {
     _limit?.cancel();
     final path = _audio;
-    final model = library.speech;
+    final model = library.speechRemote ? null : library.speech;
     if (_closed ||
         _transcribing != null ||
         !recording ||
         path == null ||
-        model == null)
+        (!library.speechRemote && model == null))
       throw StateError('No hay dictado activo');
     final elapsed = Stopwatch()..start();
     final active = Completer<void>();
@@ -110,19 +135,26 @@ class LocalSpeech {
         throw StateError('Dictado cancelado');
       if (await File(path).length() <= 3200)
         throw StateError('Grabacion demasiado corta');
-      final result = await transcribe(
-        TranscribeRequest(
-          audio: path,
-          language: library.language,
-          isTranslate: false,
-          isNoTimestamps: true,
-          threads: 4,
-          noContext: true,
-          initialPrompt: transcriptionVocabulary(resource),
-          keepModelLoaded: false,
-        ),
-        library.file(model).path,
-      );
+      final result = model == null
+          ? await transcribeRemote(
+              path,
+              library.language,
+              transcriptionVocabulary(resource),
+              library.remote,
+            )
+          : await transcribe(
+              TranscribeRequest(
+                audio: path,
+                language: library.language,
+                isTranslate: false,
+                isNoTimestamps: true,
+                threads: 4,
+                noContext: true,
+                initialPrompt: transcriptionVocabulary(resource),
+                keepModelLoaded: false,
+              ),
+              library.file(model).path,
+            );
       if (_closed || generation != _generation)
         throw StateError('Dictado cancelado');
       final text = result.trim();

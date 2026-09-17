@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../data/api.dart';
 import '../data/local_store.dart';
+import '../data/local_auth.dart';
 import '../data/repository.dart';
 import '../domain/schema.dart';
 
@@ -9,6 +10,7 @@ class AppModel extends ChangeNotifier {
   AppSchema schema;
   final ApiClient api;
   final SessionStore sessions;
+  final LocalAuth localAuth;
   Repository? repository;
   ResourceSpec selected;
   List<Map<String, dynamic>> rows = [];
@@ -19,14 +21,22 @@ class AppModel extends ChangeNotifier {
   bool _disposed = false;
   Timer? timer;
   Session? get session => api.session;
+  bool get isLocal => session?.isLocal == true;
   AppModel(this.schema, this.api, this.sessions)
-    : selected = schema.resources.first {
+    : localAuth = LocalAuth(sessions.storage),
+      selected = schema.resources.first {
     api.sessions = sessions;
   }
   Future<void> restore() async {
-    unawaited(api.flushLogouts());
+    await localAuth.ensureSeed();
     final session = await sessions.restore();
     if (session != null) await _open(session);
+  }
+
+  Future<void> loginLocal(String username, String password) async {
+    final session = await localAuth.login(username, password);
+    await _open(session);
+    await sessions.save(session);
   }
 
   Future<void> login(String url, String username, String password) async {
@@ -36,14 +46,16 @@ class AppModel extends ChangeNotifier {
   }
 
   Future<void> _open(Session session) async {
-    final nextSchema = session.contract == null
+    final bundled = await AppSchema.load();
+    final nextSchema = session.isLocal
+        ? bundled
+        : session.contract == null
         ? schema
         : AppSchema.fromRemote({
             'protocolVersion': 1,
             'contract': session.contract,
           });
     // Preserve queues from the earlier paired APK when connecting to its original contract.
-    final bundled = await AppSchema.load();
     final scopeHash = nextSchema.fingerprint == bundled.fingerprint
         ? '__SCHEMA_HASH__'
         : nextSchema.fingerprint;
@@ -59,6 +71,8 @@ class AppModel extends ChangeNotifier {
       schema,
     );
     await refreshLocal();
+    message = session.isLocal ? 'Guardado en este dispositivo' : '';
+    if (session.isLocal) return;
     timer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => unawaited(sync()),
@@ -70,7 +84,8 @@ class AppModel extends ChangeNotifier {
     if (busy) throw StateError('Espera a que termine la operacion');
     timer?.cancel();
     _syncRun = null;
-    if (session != null) await sessions.queueLogout(session!);
+    final wasLocal = isLocal;
+    if (session != null && !wasLocal) await sessions.queueLogout(session!);
     // Invalidate in-flight requests before awaiting secure-storage deletion.
     api.session = null;
     await sessions.clear();
@@ -80,7 +95,7 @@ class AppModel extends ChangeNotifier {
     rows = [];
     queue = [];
     notifyListeners();
-    unawaited(api.flushLogouts());
+    if (!wasLocal) unawaited(api.flushLogouts());
   }
 
   Future<void> refreshLocal() async {
@@ -104,6 +119,7 @@ class AppModel extends ChangeNotifier {
   }
 
   Future<void> sync() async {
+    if (isLocal) return;
     final repo = repository;
     if (busy || _syncRun != null || repo == null || _disposed) return;
     final run = Object();

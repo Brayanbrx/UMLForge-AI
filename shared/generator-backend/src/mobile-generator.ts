@@ -119,7 +119,14 @@ export async function generateMobileProject(ir: GenerationIr): Promise<Generated
     __TITLE_JSON__: JSON.stringify(ir.project.displayName).replaceAll('$', '\\$'),
     __SCHEMA_HASH__: sha256(Buffer.from(dtoContract(ir))).slice(0, 16),
   });
+  // apk.bat / apk.sh en la raiz del ZIP: compilar e instalar sin entrar en
+  // carpetas ni recordar la secuencia de Flutter. Solo delegan en
+  // mobile/tool/apk.dart, que es donde vive la logica.
+  const wrappers = await templates(resolve(defaultTemplatesRoot(), 'mobile-package'), {
+    __TITLE__: ir.project.displayName,
+  });
   const files: GeneratedFile[] = [
+    ...wrappers,
     ...backend.map((f) => ({
       path: `backend/${f.path}`,
       content:
@@ -141,7 +148,7 @@ export async function generateMobileProject(ir: GenerationIr): Promise<Generated
     { path: 'mobile/assets/contract.json', content: dtoContract(ir) },
     {
       path: 'README.md',
-      content: `# ${ir.project.displayName}: Spring Boot + Flutter Android\n\n1. Configura backend/.env a partir de .env.example: contraseña de base, AUTH_PASSWORD (12 caracteres minimo) y AUTH_TOKEN_SECRET aleatorio (32 caracteres minimo).\n2. Ejecuta docker compose up -d --build dentro de backend.\n3. Dentro de mobile ejecuta dart run tool/bootstrap.dart, flutter pub get y flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8081.\n4. Inicia sesion con el administrador configurado en el backend.\n5. En Asistente importa modelos de texto LiteRT-LM o GGUF y modelos de voz Whisper GGML .bin. Selecciona cada uno por separado; no se incluyen ni descargan pesos automaticamente. Consulta mobile/docs/local-models.md.\n\nLee mobile/README.md para limites de sincronizacion y compilacion Android. Para Postman, define username y password en un entorno local privado y ejecuta primero Iniciar sesion. El backend de este paquete requiere Bearer token; el ZIP Spring independiente sigue disponible sin este perfil.\n`,
+      content: `# ${ir.project.displayName}: Spring Boot + Flutter Android\n\nComandos de compilacion, USB y autodespliegue local: ver [COMANDOS.md](COMANDOS.md). Desde PowerShell usa .\\apk.bat deploy para backend + instalacion, o .\\apk.bat run --usb para recarga en caliente. El ZIP contiene fuentes; el APK se crea en mobile/dist al compilar.\n\n1. Con Flutter instalado, ejecuta apk.bat (Windows) o sh apk.sh (Linux/macOS) desde esta carpeta: compila el APK y lo deja en mobile/dist. Con el telefono conectado por USB y la depuracion activada, apk.bat install lo instala y lo abre; apk.bat run abre flutter run con recarga en caliente. A mano: dentro de mobile, dart run tool/bootstrap.dart, flutter pub get y flutter run.\n2. Inicia sesion sin internet con usuario admin y contraseña admin. Cada APK crea esta cuenta local y usa el modelo incluido; no necesita backend para login ni CRUD.\n3. Opcional: ejecuta dart run tool/start_backend.dart para configurar y arrancar el backend con semilla admin/admin y secretos aleatorios. Un .env existente conserva sus valores.\n4. Para usarlo, activa Conectar a un servidor en el login e introduce su URL y credenciales. Los registros del modo local y del servidor se guardan por separado.\n5. En Asistente importa modelos de texto LiteRT-LM o GGUF y modelos de voz Whisper GGML .bin. Selecciona cada uno por separado; no se incluyen ni descargan pesos automaticamente. Consulta mobile/docs/local-models.md.\n6. IA en linea (opcional): copia mobile/ai.env.example a mobile/ai.env, pega las mismas lineas de infra/.env del generador (AI_LLM_PROVIDER, AI_LLM_MODEL, AI_SPEECH_*, *_API_KEY) y vuelve a ejecutar apk.bat; o escribelas en la app en Asistente > IA en linea. Ni ai.env ni sus claves entran en Git.\n\nLee mobile/README.md para limites de sincronizacion y compilacion Android. Para Postman, define username y password en un entorno local privado y ejecuta primero Iniciar sesion. El backend de este paquete requiere Bearer token; el ZIP Spring independiente sigue disponible sin este perfil.\n`,
     },
   ];
   // The paired manifest lists the authentication/sync files as well.
