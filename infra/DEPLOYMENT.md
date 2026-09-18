@@ -2,6 +2,8 @@
 
 Esta configuración despliega una instancia de API, colaboración y PostgreSQL en una máquina Linux. Caddy publica HTTPS y WebSocket seguro. Es portable a una VM de AWS, Google Cloud, Azure o cualquier proveedor con Docker; no es una configuración de ECS, Kubernetes ni un servicio de alta disponibilidad.
 
+Para Google Cloud, la [guía de Compute Engine](GOOGLE-CLOUD.md) detalla la VM, firewall, IP fija y copias en Cloud Storage.
+
 La VM **no necesita** Java, Maven, Flutter ni Android SDK: la plataforma emite el código como ZIP y lo compila quien lo descarga, en su PC. Ver [Descargas y espacio en disco](#descargas-y-espacio-en-disco).
 
 ## Preparación

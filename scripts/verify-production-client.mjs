@@ -4,6 +4,7 @@ import { setTimeout, clearTimeout } from 'node:timers';
 import { randomUUID } from 'node:crypto';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { chromium, expect } from '@playwright/test';
+import { readFile, mkdir } from 'node:fs/promises';
 const { fetch, AbortSignal } = globalThis;
 
 const origin = 'https://localhost:18443';
@@ -95,6 +96,41 @@ try {
   // localizador que usan las pruebas E2E en e2e/support/actors.ts.
   await page.getByTestId('pestana-importar').click();
   await expect(page.getByTestId('importar-xmi')).toBeEnabled();
+  await expect(page.getByTestId('exportar-png')).toBeDisabled();
+  await page.getByTestId('crear-clase').click();
+  await page.getByTestId('nombre-clase').fill('Persona');
+  await page.getByTestId('nuevo-atributo').fill('correo');
+  await page.getByRole('button', { name: 'Añadir', exact: true }).click();
+  await page.getByTestId('tool-association').click();
+  await page.getByTestId('clase-Persona').click();
+  await page.getByTestId('clase-Persona').click();
+  await expect(page.locator('.react-flow__edge')).toHaveCount(1);
+  await page.getByTestId('rol-origen').fill('supervisor');
+  await page.getByTestId('rol-destino').fill('subordinados');
+  await expect(page.locator('.rol-asociacion')).toHaveText(['supervisor', 'subordinados']);
+  // A translated/zoomed camera must not crop the diagram or its recursive edge.
+  const viewport = page.locator('.react-flow__viewport');
+  await viewport.evaluate((element) => {
+    element.style.transform = 'translate(-1500px, -900px) scale(0.4)';
+  });
+  const cameraBefore = await viewport.getAttribute('style');
+  await page.getByTestId('exportar-png').click();
+  await page.getByRole('textbox', { name: 'Nombre de la imagen' }).fill('Diagrama UML');
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Guardar PNG' }).click();
+  const download = await downloaded;
+  assert.equal(download.suggestedFilename(), 'Diagrama UML.png');
+  await mkdir('reports', { recursive: true });
+  await download.saveAs('reports/diagram-export.png');
+  const png = await readFile('reports/diagram-export.png');
+  assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+  assert.ok(png.readUInt32BE(16) >= 600, 'full class width including padding at 2x');
+  assert.ok(png.readUInt32BE(20) >= 350, 'recursive edge is included below the class');
+  assert.ok(png.length > 4000, 'PNG contains rendered content');
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Exportado como Diagrama UML.png' }),
+  ).toBeVisible();
+  assert.equal(await viewport.getAttribute('style'), cameraBefore, 'export preserves camera');
   assert.deepEqual(errors, []);
 } finally {
   await browser.close();

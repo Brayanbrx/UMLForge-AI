@@ -104,7 +104,8 @@ export const softwareLessons: readonly SoftwareLesson[] = [
     id: 'import',
     title: 'Importar y exportar',
     question: '¿Cómo recupero un diagrama desde XMI o una imagen?',
-    keywords: 'importar exportar xmi imagen foto camara archivo enterprise architect reemplazar',
+    keywords:
+      'importar exportar xmi png imagen foto camara archivo enterprise architect reemplazar',
     where: 'Pizarra → Importar',
     summary:
       'Puedes importar un XMI o una imagen y revisar el resultado antes de aplicarlo. Exportar XMI permite llevar el modelo a otra herramienta compatible.',
@@ -112,6 +113,7 @@ export const softwareLessons: readonly SoftwareLesson[] = [
       'En Importar elige Añadir a lo que hay o Reemplazar el contenido según lo que quieras conservar.',
       'Usa Importar XMI o la opción de imagen/cámara. Revisa el modelo propuesto, las observaciones y los cambios antes de aplicarlos.',
       'Para exportar, pulsa Exportar XMI, revisa el nombre y selecciona el formato compatible con tu herramienta de destino.',
+      'Para guardar una imagen, pulsa Exportar imagen PNG, elige el nombre y pulsa Guardar PNG. Incluye el diagrama completo con el tema actual, aunque algunas clases queden fuera de la vista. Los lectores también pueden descargarla.',
     ],
     practice:
       'Antes de reemplazar un diagrama importante, exporta su XMI. Después puedes revisar una importación y descartarla si no coincide.',

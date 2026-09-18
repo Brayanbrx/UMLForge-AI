@@ -12,6 +12,7 @@ import { removeCandidateCommand } from './candidate.js';
 import { apiRequest, downloadXmi } from '../../lib/api.js';
 import { descargarBlob, nombreDeArchivo } from '../../lib/guardar-archivo.js';
 import { CapturaCamara } from './CapturaCamara.js';
+import { ExportImage } from './ExportImage.js';
 
 /**
  * Importacion por foto y XMI, y exportacion a XMI (M4 y M5).
@@ -268,6 +269,8 @@ export function ImportPanel({
           Exportar XMI
         </button>
       </div>
+
+      <ExportImage boardName={boardName} empty={state.semantic.classes.length === 0} />
 
       <input
         ref={imagenRef}
