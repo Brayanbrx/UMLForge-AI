@@ -29,6 +29,52 @@ afterEach(async () => {
 });
 
 describe('production safeguards', () => {
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(
+    'allows %s preflight from the configured HTTPS origin',
+    async (method) => {
+      const origin = 'https://uml.asiscarretera.online';
+      app = await buildApp(loadConfig({ ...base, WEB_ORIGIN: origin }));
+      const response = await app.inject({
+        method: 'OPTIONS',
+        url: '/projects',
+        headers: {
+          origin,
+          'access-control-request-method': method,
+          'access-control-request-headers': 'authorization,content-type',
+        },
+      });
+      expect(response.statusCode).toBe(204);
+      expect(response.headers['access-control-allow-origin']).toBe(origin);
+      expect(response.headers['access-control-allow-credentials']).toBe('true');
+      expect(
+        String(response.headers['access-control-allow-methods'])
+          .split(',')
+          .map((value) => value.trim()),
+      ).toContain(method);
+      expect(String(response.headers['access-control-allow-headers']).toLowerCase()).toContain(
+        'authorization',
+      );
+      expect(String(response.headers.vary).toLowerCase()).toContain('origin');
+    },
+  );
+  it.each([
+    'https://asiscarretera.online',
+    'http://uml.asiscarretera.online',
+    'https://35.255.28.222',
+    'https://uml.asiscarretera.online.evil.test',
+    'null',
+  ])('does not grant CORS to %s', async (origin) => {
+    app = await buildApp(loadConfig({ ...base, WEB_ORIGIN: 'https://uml.asiscarretera.online' }));
+    for (const method of ['GET', 'OPTIONS'] as const) {
+      const response = await app.inject({
+        method,
+        url: '/health',
+        headers: { origin, 'access-control-request-method': 'PATCH' },
+      });
+      expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    }
+    expect((await app.inject('/health')).statusCode).toBe(200);
+  });
   it.each([
     ['COOKIE_SECURE', 'false'],
     ['WEB_ORIGIN', 'http://example.org'],

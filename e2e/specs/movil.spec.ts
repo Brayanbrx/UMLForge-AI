@@ -41,11 +41,22 @@ for (const viewport of pantallas) {
         .fill('Proyecto de modelado desde un teléfono móvil');
       await page.getByTestId('crear-proyecto').tap();
       await expect(page.getByTestId('lista-pizarras')).toBeVisible();
+      await expect(page.getByTestId('alternar-colaboradores')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+      await expect(page.locator('#detalle-colaboradores')).toBeHidden();
+      await page.getByTestId('alternar-colaboradores').tap();
+      await expect(page.locator('#detalle-colaboradores')).toBeVisible();
+      await page.getByTestId('alternar-colaboradores').tap();
       await page.getByTestId('invitar-editor').tap();
       await expect(page.getByTestId('codigo-generado')).toBeVisible();
+      await expect(page.locator('#detalle-colaboradores')).toBeVisible();
       await comprobarAncho(page, testInfo, 'pizarras', viewport.width);
       await page.getByTestId('nombre-pizarra').fill('Diagrama de ventas y clientes desde el móvil');
       await page.getByTestId('crear-pizarra').tap();
+      await page.getByTestId('alternar-colaboradores').tap();
+      await comprobarAncho(page, testInfo, 'pizarras-compactas', viewport.width);
       await page.getByRole('link', { name: 'Diagrama de ventas y clientes desde el móvil' }).tap();
       await expect(page.getByTestId('estado-conexion')).toHaveText('En vivo');
       await expect(page.getByRole('link', { name: 'Proyecto', exact: true })).toBeInViewport();
@@ -64,6 +75,21 @@ for (const viewport of pantallas) {
 
       for (const herramienta of ['importar', 'generar', 'asistente']) {
         await page.getByTestId(`pestana-${herramienta}`).tap();
+        if (herramienta === 'generar') {
+          const checkbox = page.getByTestId('incluir-flutter');
+          const bounds = await checkbox.boundingBox();
+          expect(bounds!.height).toBeLessThanOrEqual(20);
+          expect(bounds!.width).toBeLessThanOrEqual(20);
+          const label = page.locator('label.opcion-checkbox');
+          expect((await label.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+          await label.tap();
+          await expect(checkbox).toBeChecked();
+          await page.getByTestId('pestana-importar').tap();
+          await page.getByTestId('pestana-generar').tap();
+          await expect(checkbox).toBeChecked();
+          await label.tap();
+          await expect(checkbox).not.toBeChecked();
+        }
         await comprobarAncho(page, testInfo, `editor-${herramienta}`, viewport.width);
       }
       await page.getByTestId('alternar-panel').tap();

@@ -44,7 +44,16 @@ export async function buildApp(config: Config = loadConfig()): Promise<FastifyIn
     requestTimeout: 30_000,
   });
 
-  await app.register(cors, { origin: config.WEB_ORIGIN, credentials: true });
+  await app.register(cors, {
+    // An exact allowlist: sibling domains, HTTP and direct IP access do not
+    // receive CORS permissions. WEB_ORIGIN also defines password-reset links.
+    origin: [config.WEB_ORIGIN],
+    credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    exposedHeaders: ['Content-Disposition', 'Retry-After'],
+    maxAge: 600,
+  });
   await app.register(cookie);
   await app.register(prismaPlugin, { config });
   await app.register(securityPlugin, { config });

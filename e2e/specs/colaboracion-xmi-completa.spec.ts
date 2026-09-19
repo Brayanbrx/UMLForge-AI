@@ -10,6 +10,7 @@ test('retirar a un participante también cierra su página de proyecto abierta',
   const scenario = await montarEscenario(browser, 'Retirada desde proyecto', { abrirAmbos: false });
   try {
     await scenario.ana.page.getByTitle('Volver al proyecto', { exact: true }).click();
+    await scenario.ana.page.getByTestId('alternar-colaboradores').click();
     scenario.ana.page.once('dialog', (dialog) => dialog.accept());
     await scenario.ana.page
       .getByRole('button', { name: `Retirar a ${scenario.beto.email}`, exact: true })
@@ -28,6 +29,7 @@ test('un participante puede salir del proyecto y desaparece de la lista del prop
 }) => {
   const scenario = await montarEscenario(browser, 'Salida voluntaria', { abrirAmbos: false });
   try {
+    await scenario.beto.page.getByTestId('alternar-colaboradores').click();
     scenario.beto.page.once('dialog', (dialog) => dialog.accept());
     await scenario.beto.page
       .getByRole('button', { name: 'Salir del proyecto', exact: true })
@@ -53,6 +55,7 @@ test('administra roles, revoca invitaciones y retira acceso desde la interfaz', 
   const { ana, beto } = scenario;
   try {
     await ana.page.getByTitle('Volver al proyecto', { exact: true }).click();
+    await ana.page.getByTestId('alternar-colaboradores').click();
     const role = ana.page.getByRole('combobox', { name: `Rol de ${beto.email}`, exact: true });
     await role.selectOption('VIEWER');
     await expect(beto.page.getByTestId('crear-clase')).toBeDisabled();
@@ -149,8 +152,8 @@ for (const format of ['EA_21', 'UML_251'])
       await ana.page
         .getByRole('combobox', { name: 'Formato XMI', exact: true })
         .selectOption(format);
-      const download = ana.page.waitForEvent('download');
       await expect(ana.page.getByTestId('confirmar-export')).toBeInViewport();
+      const download = ana.page.waitForEvent('download');
       await ana.page.getByTestId('confirmar-export').click();
       const path = await (await download).path();
       const xml = await readFile(path, 'utf8');

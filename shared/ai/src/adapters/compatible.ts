@@ -32,6 +32,7 @@ export interface CompatibleAdapterOptions {
   readonly provider?: string;
   readonly jsonMode?: boolean;
   readonly thinking?: boolean;
+  readonly chatTemplateThinking?: boolean;
   readonly reasoningEffort?: 'low' | 'high' | 'max';
   readonly maxOutputTokens?: number;
   /** Obligatorio: OpenRouter sirve cientos de modelos y ninguno es el obvio. */
@@ -189,6 +190,9 @@ class ClienteCompatible {
           ...(this.options.thinking === undefined
             ? {}
             : { thinking: { type: this.options.thinking ? 'enabled' : 'disabled' } }),
+          ...(this.options.chatTemplateThinking === undefined
+            ? {}
+            : { chat_template_kwargs: { enable_thinking: this.options.chatTemplateThinking } }),
           messages: [
             { role: 'system', content: peticion.sistema },
             { role: 'user', content: peticion.usuario },

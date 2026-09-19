@@ -148,7 +148,7 @@ export const softwareLessons: readonly SoftwareLesson[] = [
       'La web genera un paquete de código desde el diagrama. Puedes incluir el backend y, opcionalmente, el proyecto Flutter Android.',
     steps: [
       'Abre Generar, revisa Paquete Java y corrige los errores del modelo que impidan continuar.',
-      'Activa Incluir Flutter Android con login, datos offline y modelos locales si también necesitas la app móvil. Pulsa Generar proyecto.',
+      'Activa Incluir app Android si también necesitas la app móvil. Pulsa Generar proyecto.',
       'Al terminar, usa Descargar backend o Descargar Android + backend. Descomprime el ZIP y sigue el README incluido para ejecutar o compilar el proyecto.',
     ],
     practice:

@@ -20,6 +20,8 @@ Para preparar un ejemplo Android: `npm run demo:mobile`. En la carpeta generada,
 ## Arranque rápido
 
 Para Google Cloud Compute Engine, seguir la [guía de Google Cloud](infra/GOOGLE-CLOUD.md). Para otros proveedores con una VM y dominio HTTPS, seguir la [guía de producción](infra/DEPLOYMENT.md).
+
+Despliegue preparado para **uml.asiscarretera.online** en **35.255.28.222**: [configuración y pasos de instalación](infra/DEPLOY-UML.md).
 Incluye Compose separado, certificados, cuotas, copias S3, restauración aislada,
 monitorización y actualización por versión. `npm run test:production` verifica el
 entorno HTTPS en contenedores temporales.

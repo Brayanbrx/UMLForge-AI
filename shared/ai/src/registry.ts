@@ -664,13 +664,24 @@ function compatibleOptions(
     model,
     timeoutMs,
     maxRetries: config.AI_MAX_RETRIES,
-    maxOutputTokens: config.AI_COMPATIBLE_MAX_OUTPUT_TOKENS,
+    // Command A and Command A Vision reject requests above 8192 even when
+    // the actual answer would be short. Keep the global budget for other models.
+    maxOutputTokens:
+      provider === 'cohere' && ['command-a-03-2025', 'command-a-vision-07-2025'].includes(model)
+        ? Math.min(config.AI_COMPATIBLE_MAX_OUTPUT_TOKENS, 8192)
+        : provider === 'nvidia' && model === 'google/gemma-4-31b-it'
+          ? Math.min(config.AI_COMPATIBLE_MAX_OUTPUT_TOKENS, 4096)
+          : config.AI_COMPATIBLE_MAX_OUTPUT_TOKENS,
     apiKey: credencial(config, provider, 'AI_*_PROVIDER'),
     baseUrl: urls[provider].replace(/\/$/, ''),
     // El prompt sigue exigiendo JSON y el resultado siempre se valida. NVIDIA
     // no garantiza `response_format` en todos sus modelos: alli se confia en
     // el esquema del prompt y en la validacion de la respuesta.
     jsonMode: provider !== 'nvidia',
+    // El razonamiento extendido de Gemma supera el plazo del respaldo interactivo.
+    ...(provider === 'nvidia' && model === 'google/gemma-4-31b-it'
+      ? { chatTemplateThinking: false }
+      : {}),
     ...(provider === 'moonshot' && model.startsWith('kimi-k3')
       ? { reasoningEffort: 'low' as const }
       : provider === 'zai' || provider === 'moonshot'

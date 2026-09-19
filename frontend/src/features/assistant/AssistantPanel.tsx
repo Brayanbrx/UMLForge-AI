@@ -386,7 +386,7 @@ export function AssistantPanel({
       )}
       {!dictando && dictadoOriginal !== null && (
         <div className="revision-dictado" data-testid="revision-dictado">
-          <p>Texto preparado sin consumir tokens de la IA. Revísalo y pulsa Enviar.</p>
+          <p>Revisa el dictado antes de enviarlo.</p>
           {dictadoOriginal !== texto && (
             <button type="button" onClick={() => setTexto(dictadoOriginal)} disabled={pendiente}>
               Recuperar dictado original

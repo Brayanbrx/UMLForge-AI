@@ -243,8 +243,18 @@ export const PROPOSAL_JSON_SCHEMA = {
           unique: { type: 'boolean' },
           fromClass: { type: 'string' },
           toClass: { type: 'string' },
-          fromMultiplicity: { type: 'string', enum: [...MULTIPLICITIES] },
-          toMultiplicity: { type: 'string', enum: [...MULTIPLICITIES] },
+          fromMultiplicity: {
+            type: 'string',
+            enum: [...MULTIPLICITIES],
+            description:
+              'Number of fromClass instances per one toClass instance. Pedido -> Cliente: 0..* orders per customer.',
+          },
+          toMultiplicity: {
+            type: 'string',
+            enum: [...MULTIPLICITIES],
+            description:
+              'Number of toClass instances per one fromClass instance. Pedido -> Cliente: 1 customer per order.',
+          },
           fromRole: { type: 'string' },
           toRole: { type: 'string' },
           // Sin esto el proveedor no puede proponer una herencia aunque el

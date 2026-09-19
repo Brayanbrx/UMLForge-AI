@@ -1,5 +1,7 @@
 # Google Cloud Compute Engine con Docker
 
+Para la VM **35.255.28.222** y el dominio **uml.asiscarretera.online**, usa el [procedimiento preparado para este despliegue](DEPLOY-UML.md).
+
 La plataforma está preparada para una única VM Linux: Caddy termina HTTPS, la web sirve los archivos estáticos, la API y el servidor colaborativo comparten PostgreSQL. El archivo base debe combinarse con `compose.production.yml`; `npm run up` es para desarrollo. No aumentar réplicas de colaboración: las salas están en memoria y todavía no existe coordinación entre servidores.
 
 ## 1. VM y red

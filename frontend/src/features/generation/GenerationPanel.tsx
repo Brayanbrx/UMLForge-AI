@@ -59,7 +59,7 @@ export function GenerationPanel({
       setUltimoMobile(includeMobile);
       setEstado(
         `Generado ${resultado.artifactName} · ${resultado.entities} entidades · ` +
-          `snapshot v${resultado.snapshotVersion} · paquete ${resultado.basePackage}`,
+          `versión ${resultado.snapshotVersion} del modelo · paquete ${resultado.basePackage}`,
       );
       refrescar();
     } catch (causa) {
@@ -152,7 +152,7 @@ export function GenerationPanel({
         />
       </label>
 
-      <label>
+      <label className="opcion-checkbox">
         <input
           type="checkbox"
           checked={includeMobile}
@@ -160,13 +160,14 @@ export function GenerationPanel({
           disabled={trabajando || !canWrite}
           data-testid="incluir-flutter"
         />
-        Incluir Flutter Android con login, datos offline y modelos locales
+        <span>
+          Incluir app Android <small>Flutter, inicio de sesión y datos sin conexión.</small>
+        </span>
       </label>
       {includeMobile && (
         <p className="aviso">
-          El ZIP incluye Flutter, su backend y comandos para compilar el APK e instalarlo por USB.
-          Necesitas Flutter y Android SDK en la PC. Los modelos de texto y voz se cargan después en
-          el teléfono.
+          Incluye la app Flutter y su backend. Para compilar el APK necesitas Flutter y Android SDK
+          en tu equipo. Los modelos de texto y voz se instalan después en el teléfono.
         </p>
       )}
       <button

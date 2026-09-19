@@ -35,10 +35,9 @@ export function LoginPage(): React.JSX.Element {
             <IconoDiagrama size={26} />
           </span>
           <h2>UMLFORGE AI</h2>
-          <p className="lema">Dale forma a tu próximo sistema.</p>
+          <p className="lema">Diagramas de clases en equipo.</p>
           <p className="acceso-detalle">
-            Un espacio para pensar en equipo. Conecta tus clases, afina el modelo y conviértelo en
-            un backend listo para construir.
+            Edita diagramas UML, comparte pizarras y genera un proyecto Java a partir del modelo.
           </p>
 
           <DiagramaDecorativo />
@@ -174,7 +173,7 @@ export function LoginPage(): React.JSX.Element {
 
           {enviado && (
             <p className="aviso-ok" role="status" data-testid="recuperacion-enviada">
-              Si ese correo tiene cuenta, el enlace ya va en camino. Revisa tu bandeja.
+              Si existe una cuenta con ese correo, recibirás un enlace para cambiar la contraseña.
             </p>
           )}
 

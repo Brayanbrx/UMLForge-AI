@@ -22,6 +22,30 @@ for (const path of ['/', '/api/health', '/api/ready', '/collab/health']) {
 const redirect = await fetch('http://localhost:18080/', { redirect: 'manual' });
 assert.equal(redirect.status, 308);
 assert.ok(redirect.headers.get('location').startsWith('https://'));
+for (const method of ['PUT', 'PATCH', 'DELETE']) {
+  const preflight = await request('/api/projects', {
+    method: 'OPTIONS',
+    headers: {
+      origin,
+      'access-control-request-method': method,
+      'access-control-request-headers': 'authorization,content-type',
+    },
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get('access-control-allow-origin'), origin);
+  assert.equal(preflight.headers.get('access-control-allow-credentials'), 'true');
+  assert.ok(
+    preflight.headers
+      .get('access-control-allow-methods')
+      .split(',')
+      .map((value) => value.trim())
+      .includes(method),
+  );
+}
+const foreign = await request('/api/health', {
+  headers: { origin: 'https://untrusted.example.org' },
+});
+assert.equal(foreign.headers.get('access-control-allow-origin'), null);
 const email = `${randomUUID()}@example.org`;
 const password = randomUUID();
 const registration = await request('/api/auth/register', {

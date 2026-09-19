@@ -16,6 +16,8 @@ import { api, type ProjectDetail, type ProjectSummary } from '../../lib/api.js';
 import { useAsyncAction, useSession } from '../auth/session.js';
 import { ProjectMembers } from './ProjectMembers.js';
 
+const ROLE_LABEL = { OWNER: 'Propietario', EDITOR: 'Editor', VIEWER: 'Lector' } as const;
+
 /** Lista de proyectos y creación (RF-001, RF-A04). */
 export function ProjectsPage(): React.JSX.Element {
   const { user, logout } = useSession();
@@ -41,7 +43,7 @@ export function ProjectsPage(): React.JSX.Element {
         <header className="encabezado-pagina">
           <div>
             <h1>Mis proyectos</h1>
-            <p className="subtitulo">Cada proyecto guarda sus pizarras y a quién invitaste.</p>
+            <p className="subtitulo">Tus diagramas y proyectos compartidos.</p>
           </div>
         </header>
 
@@ -124,10 +126,7 @@ export function ProjectsPage(): React.JSX.Element {
                 <IconoProyecto size={22} />
               </span>
               <h2>Aún no tienes proyectos</h2>
-              <p>
-                Crea tu primer proyecto para empezar a modelar, o únete a uno con el código que te
-                hayan pasado.
-              </p>
+              <p>Crea un proyecto o únete con un código de invitación.</p>
             </li>
           )}
 
@@ -150,7 +149,7 @@ export function ProjectsPage(): React.JSX.Element {
                   {proyecto.memberCount} {proyecto.memberCount === 1 ? 'miembro' : 'miembros'}
                 </span>
                 <span className={`insignia-rol rol-${proyecto.role.toLowerCase()}`}>
-                  {proyecto.role}
+                  {ROLE_LABEL[proyecto.role]}
                 </span>
 
                 {/* RF-001: solo el propietario borra, y borrar un proyecto se
@@ -264,7 +263,9 @@ function ProjectSession({
               este proyecto
             </p>
           </div>
-          <span className={`insignia-rol rol-${proyecto.role.toLowerCase()}`}>{proyecto.role}</span>
+          <span className={`insignia-rol rol-${proyecto.role.toLowerCase()}`}>
+            {ROLE_LABEL[proyecto.role]}
+          </span>
         </header>
 
         <section className="barra-acciones">

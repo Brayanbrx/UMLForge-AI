@@ -40,7 +40,7 @@ test.describe('generacion desde el editor', () => {
       // visible de RA-08 para quien mire la pantalla en la defensa.
       const estado = escenario.ana.page.getByTestId('estado-generacion');
       await expect(estado).toContainText('entidades', { timeout: 30_000 });
-      await expect(estado).toContainText('snapshot v');
+      await expect(estado).toContainText(/versión \d+ del modelo/);
       await expect(estado).toContainText('bo.edu.demo');
 
       // Y el historial enseña el manifiesto congelado, no el estado de ahora.

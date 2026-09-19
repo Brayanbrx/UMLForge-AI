@@ -27,6 +27,78 @@ const reply = () =>
   );
 const entry = (model: string) => ({ provider: 'openrouter', model });
 
+it.each([
+  ['command-a-03-2025', '16384', 8192],
+  ['command-a-vision-07-2025', '16384', 8192],
+  ['command-a-03-2025', '2048', 2048],
+])('respects Cohere output limits for %s with budget %s', async (model, budget, expected) => {
+  const calls = vi.fn(async () => reply());
+  vi.stubGlobal('fetch', calls);
+  const ports = createAiPorts(
+    loadAiConfig({
+      AI_LLM_PROVIDER: 'cohere',
+      AI_LLM_MODEL: String(model),
+      COHERE_API_KEY: 'test-key',
+      AI_COMPATIBLE_MAX_OUTPUT_TOKENS: String(budget),
+    }),
+  );
+  await ports.llm.answer(question);
+  const [url, init] = calls.mock.calls[0] as unknown as [string, RequestInit];
+  expect(url).toBe('https://api.cohere.ai/compatibility/v1/chat/completions');
+  expect(JSON.parse(String(init.body)).max_tokens).toBe(expected);
+});
+
+it('pasa de cuota agotada a Cohere y NVIDIA con los parametros de cada modelo', async () => {
+  const requests: { url: string; body: Record<string, unknown> }[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init: RequestInit) => {
+      requests.push({ url, body: JSON.parse(String(init.body)) as Record<string, unknown> });
+      return requests.length < 3
+        ? new Response('{}', { status: 429 })
+        : new Response(
+            JSON.stringify({
+              choices: [
+                {
+                  message: {
+                    content: JSON.stringify({
+                      operations: [{ op: 'CREATE_CLASS', className: 'Cliente' }],
+                    }),
+                  },
+                },
+              ],
+            }),
+          );
+    }),
+  );
+  const ports = createAiPorts(
+    loadAiConfig({
+      ...base,
+      COHERE_API_KEY: 'cohere-test',
+      NVIDIA_API_KEY: 'nvidia-test',
+      AI_LLM_FALLBACKS: JSON.stringify([
+        { provider: 'cohere', model: 'command-a-03-2025' },
+        { provider: 'nvidia', model: 'google/gemma-4-31b-it' },
+      ]),
+    }),
+  );
+  const result = await ports.llm.proposeCommands({ snapshot, instruction: 'Crea Cliente' });
+  expect(result.proposal.operations).toEqual([{ op: 'CREATE_CLASS', className: 'Cliente' }]);
+  expect(result.usage?.provider).toBe('nvidia');
+  expect(requests.map((request) => request.body.model)).toEqual([
+    'primary',
+    'command-a-03-2025',
+    'google/gemma-4-31b-it',
+  ]);
+  expect(requests[1]?.body.max_tokens).toBe(8192);
+  expect(requests[1]?.body.response_format).toEqual({ type: 'json_object' });
+  expect(requests[1]?.body).not.toHaveProperty('chat_template_kwargs');
+  expect(requests[2]?.url).toBe('https://integrate.api.nvidia.com/v1/chat/completions');
+  expect(requests[2]?.body.chat_template_kwargs).toEqual({ enable_thinking: false });
+  expect(requests[2]?.body.max_tokens).toBe(4096);
+  expect(requests[2]?.body).not.toHaveProperty('response_format');
+});
+
 it('recorre principal y siete respaldos en orden, termina en el primero exitoso', async () => {
   const calls: string[] = [];
   vi.stubGlobal(
@@ -46,6 +118,48 @@ it('recorre principal y siete respaldos en orden, termina en el primero exitoso'
   expect((await ports.llm.answer(question)).text).toBe('respuesta');
   expect(calls).toEqual(['primary', 'f0', 'f1', 'f2', 'f3', 'f4', 'f5', 'f6']);
   expect(ports.usageLog).toHaveLength(1);
+});
+
+it('usa Command A+ como respaldo de imagen sin aplicar el limite de Command A antiguo', async () => {
+  const calls = vi
+    .fn()
+    .mockResolvedValueOnce(new Response('{}', { status: 503 }))
+    .mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  operations: [{ op: 'CREATE_CLASS', className: 'Persona' }],
+                }),
+              },
+            },
+          ],
+        }),
+      ),
+    );
+  vi.stubGlobal('fetch', calls);
+  const ports = createAiPorts(
+    loadAiConfig({
+      AI_VISION_PROVIDER: 'mistral',
+      AI_VISION_MODEL: 'ministral-14b-latest',
+      MISTRAL_API_KEY: 'test-mistral',
+      COHERE_API_KEY: 'test-cohere',
+      AI_MAX_RETRIES: '0',
+      AI_VISION_FALLBACKS: '[{"provider":"cohere","model":"command-a-plus-05-2026"}]',
+    }),
+  );
+  const result = await ports.vision.extractModel({
+    image: new Uint8Array([1, 2, 3]),
+    mediaType: 'image/png',
+  });
+  expect(result.usage?.provider).toBe('cohere');
+  expect(result.proposal.operations).toEqual([{ op: 'CREATE_CLASS', className: 'Persona' }]);
+  const body = JSON.parse(String((calls.mock.calls[1]?.[1] as RequestInit).body));
+  expect(body.model).toBe('command-a-plus-05-2026');
+  expect(body.max_tokens).toBe(16384);
+  expect(body.messages[1].content[1].image_url.url).toBe('data:image/png;base64,AQID');
 });
 
 it('legacy es el primer respaldo y el array continua despues', async () => {

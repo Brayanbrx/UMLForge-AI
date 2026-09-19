@@ -360,6 +360,38 @@ input::placeholder {
   color: var(--texto-tenue);
 }
 
+/* Las casillas conservan su tamaño; la etiqueta ofrece el área táctil. */
+input[type='checkbox'],
+input[type='radio'] {
+  width: 1.125rem;
+  height: 1.125rem;
+  min-height: 0;
+  flex: 0 0 1.125rem;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--acento);
+}
+
+label.opcion-checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--e-3);
+  min-height: 2.75rem;
+  padding-block: var(--e-2);
+  cursor: pointer;
+}
+
+.opcion-checkbox > span {
+  min-width: 0;
+  line-height: 1.5;
+}
+
+.opcion-checkbox small {
+  display: block;
+  color: var(--texto-suave);
+  font-size: var(--t-md);
+}
+
 /* Un campo con error se marca en rojo ademas de con su mensaje. */
 input[aria-invalid='true'] {
   border-color: var(--error);
