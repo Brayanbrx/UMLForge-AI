@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import console from 'node:console';
+import process from 'node:process';
 import { setTimeout, clearTimeout } from 'node:timers';
 import { randomUUID } from 'node:crypto';
 import { HocuspocusProvider } from '@hocuspocus/provider';
 import { chromium, expect } from '@playwright/test';
 import { readFile, mkdir } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 const { fetch, AbortSignal } = globalThis;
 
 const origin = 'https://localhost:18443';
@@ -58,9 +61,76 @@ const registration = await request('/api/auth/register', {
   }),
 });
 assert.equal(registration.status, 201);
-assert.match(registration.headers.get('set-cookie'), /; Secure/i);
-assert.match(registration.headers.get('set-cookie'), /; HttpOnly/i);
-const { accessToken } = await registration.json();
+assert.equal(registration.headers.get('set-cookie'), null);
+assert.deepEqual(await registration.json(), { verificationRequired: true, emailSent: true });
+const composeArgs = JSON.parse(process.env.UML_TEST_COMPOSE_ARGS);
+assert.ok(
+  composeArgs.includes('-p') && composeArgs.some((arg) => arg.startsWith('uml-prod-test-')),
+);
+const { stdout: mailJson } = await promisify(execFile)('docker', [
+  ...composeArgs,
+  'exec',
+  '-T',
+  'api',
+  'cat',
+  '/tmp/test-mail.json',
+]);
+const verificationToken = JSON.parse(mailJson).textContent.match(/#token=([^\s]+)/)[1];
+const browserForActivation = await chromium.launch();
+try {
+  const context = await browserForActivation.newContext({ ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  await page.goto(`${origin}/activar#token=${verificationToken}`);
+  await page.getByRole('button', { name: 'Activar mi cuenta', exact: true }).click();
+  await expect(page.getByTestId('cuenta-activada')).toBeVisible();
+  const uiEmail = `ui-${email}`;
+  await page.goto(`${origin}/entrar`);
+  await page.getByRole('button', { name: 'Crear cuenta', exact: true }).click();
+  await page.getByTestId('email').fill(uiEmail);
+  await page.getByTestId('displayName').fill('Activación de prueba');
+  await page.getByTestId('password').fill(password);
+  await page.getByTestId('enviar').click();
+  await expect(page.getByTestId('activacion-pendiente')).toContainText('Te enviamos un enlace');
+  await page.getByTestId('password').fill(password);
+  await page.getByTestId('enviar').click();
+  await expect(page.getByTestId('error-sesion')).toContainText('Activa tu cuenta');
+  const { stdout: uiMail } = await promisify(execFile)('docker', [
+    ...composeArgs,
+    'exec',
+    '-T',
+    'api',
+    'cat',
+    '/tmp/test-mail.json',
+  ]);
+  const uiToken = JSON.parse(uiMail).textContent.match(/#token=([^\s]+)/)[1];
+  await page.goto(`${origin}/activar#token=${uiToken}`);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await mkdir('reports', { recursive: true });
+  await page.screenshot({ path: 'reports/email-activation-mobile.png', fullPage: true });
+  assert.ok(
+    await page.evaluate(
+      () => globalThis.document.documentElement.scrollWidth <= globalThis.innerWidth,
+    ),
+  );
+  await page.getByRole('button', { name: 'Activar mi cuenta', exact: true }).click();
+  await expect(page.getByTestId('cuenta-activada')).toBeVisible();
+  await page.getByRole('link', { name: 'Ir a iniciar sesión' }).click();
+  await page.getByTestId('email').fill(uiEmail);
+  await page.getByTestId('password').fill(password);
+  await page.getByTestId('enviar').click();
+  await expect(page.getByTestId('lista-proyectos')).toBeVisible();
+} finally {
+  await browserForActivation.close();
+}
+const login = await request('/api/auth/login', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ email, password }),
+});
+assert.equal(login.status, 200);
+assert.match(login.headers.get('set-cookie'), /; Secure/i);
+assert.match(login.headers.get('set-cookie'), /; HttpOnly/i);
+const { accessToken } = await login.json();
 const headers = { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' };
 const project = await (
   await request('/api/projects', {

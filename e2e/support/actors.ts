@@ -1,4 +1,6 @@
 import { expect, type Browser, type Page } from '@playwright/test';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 /**
  * Ayudantes para conducir la interfaz como lo haria una persona.
@@ -33,6 +35,44 @@ export async function registrarActor(browser: Browser, prefijo: string): Promise
   await page.getByRole('button', { name: 'Crear cuenta' }).click();
   await page.getByTestId('email').fill(email);
   await page.getByTestId('displayName').fill(displayName);
+  await page.getByTestId('password').fill('contrasena-de-prueba');
+  await page.getByTestId('enviar').click();
+
+  await expect(page.getByTestId('activacion-pendiente')).toBeVisible();
+  // Solo en el entorno de pruebas local con MAIL_PROVIDER=log. No hay endpoint
+  // de prueba ni tokens de activación en las respuestas públicas.
+  const { stdout } = await promisify(execFile)('docker', [
+    'compose',
+    '-f',
+    'infra/compose.yml',
+    '--env-file',
+    'infra/.env',
+    'logs',
+    '--no-color',
+    '--no-log-prefix',
+    '--tail',
+    '500',
+    'api',
+  ]);
+  const messages = stdout.split(/\r?\n/).flatMap((line) => {
+    try {
+      return [JSON.parse(line) as { destinatario?: string; cuerpo?: string }];
+    } catch {
+      return [];
+    }
+  });
+  const token = messages
+    .findLast((m) => m.destinatario === email && m.cuerpo?.includes('/activar#'))
+    ?.cuerpo?.match(/#token=([^\s]+)/)?.[1];
+  if (!token)
+    throw new Error(
+      'E2E necesita MAIL_PROVIDER=log y el Compose local para leer el correo de activación.',
+    );
+  await page.goto(`/activar#token=${token}`);
+  await page.getByRole('button', { name: 'Activar mi cuenta', exact: true }).click();
+  await expect(page.getByTestId('cuenta-activada')).toBeVisible();
+  await page.getByRole('link', { name: 'Ir a iniciar sesión' }).click();
+  await page.getByTestId('email').fill(email);
   await page.getByTestId('password').fill('contrasena-de-prueba');
   await page.getByTestId('enviar').click();
 

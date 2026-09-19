@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { IconoDiagrama } from '../../components/icons.js';
 import { ThemeSelect } from '../../components/ThemeProvider.js';
 import { perfil } from '../../lib/api.js';
@@ -20,6 +20,7 @@ export function LoginPage(): React.JSX.Element {
   const [password, setPassword] = useState('');
   // Solo cambia el `type` del campo. La contrasena y su envio no se tocan.
   const [verPassword, setVerPassword] = useState(false);
+  const [activacion, setActivacion] = useState<string | null>(null);
 
   return (
     <main className="acceso">
@@ -60,7 +61,17 @@ export function LoginPage(): React.JSX.Element {
               }
 
               if (modo === 'entrar') await login(email, password);
-              else await register(email, displayName, password);
+              else {
+                const result = await register(email, displayName, password);
+                setActivacion(
+                  result.emailSent
+                    ? `Revisa tu correo ${email}. Te enviamos un enlace para activar la cuenta; caduca en 24 horas. Revisa también spam.`
+                    : 'Tu cuenta está creada, pero no pudimos enviar el correo. Solicita otro enlace de activación.',
+                );
+                setPassword('');
+                setModo('entrar');
+                return;
+              }
               void navegar('/proyectos');
             });
           }}
@@ -77,7 +88,7 @@ export function LoginPage(): React.JSX.Element {
               {modo === 'entrar'
                 ? 'Entra para seguir con tus diagramas.'
                 : modo === 'registrar'
-                  ? 'Necesitas una cuenta para crear proyectos.'
+                  ? 'Te enviaremos un enlace para activar tu cuenta.'
                   : 'Te enviamos un enlace para elegir una contraseña nueva.'}
             </p>
           </div>
@@ -170,6 +181,15 @@ export function LoginPage(): React.JSX.Element {
               {error}
             </p>
           )}
+
+          {activacion && (
+            <p className="aviso-ok" role="status" data-testid="activacion-pendiente">
+              {activacion}
+            </p>
+          )}
+          <Link to="/activar" className="enlace-discreto">
+            ¿No recibiste el enlace de activación?
+          </Link>
 
           {enviado && (
             <p className="aviso-ok" role="status" data-testid="recuperacion-enviada">

@@ -110,4 +110,4 @@ skills-lock.json
 # de apoyo. La documentacion que si se versiona —ADR, requisitos, arquitectura,
 # despliegue— vive en el resto de `docs/`. Anclado a la raiz: sin la barra
 # inicial tambien ignoraba `templates/flutter/docs/`, que es codigo del generador.
-/docs/
+/docs/*

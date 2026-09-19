@@ -14,6 +14,20 @@ await mkdir('tmp', { recursive: true });
 const dir = await mkdtemp(resolve('tmp', 'production-check-'));
 const envFile = resolve(dir, '.env');
 const override = resolve(dir, 'compose.test.yml');
+const mailStub = resolve(dir, 'mail-stub.mjs');
+await writeFile(
+  mailStub,
+  `import { writeFile } from 'node:fs/promises';
+const realFetch = globalThis.fetch;
+globalThis.fetch = async (url, options) => {
+  if (String(url) === 'https://api.brevo.com/v3/smtp/email') {
+    await writeFile('/tmp/test-mail.json', options.body);
+    return new Response('{}', { status: 201 });
+  }
+  return realFetch(url, options);
+};
+`,
+);
 const password = randomBytes(32).toString('hex');
 await writeFile(
   envFile,
@@ -37,6 +51,11 @@ AI_SPEECH_PROVIDER=mock
 await writeFile(
   override,
   `services:
+  api:
+    environment:
+      NODE_OPTIONS: '--import=/opt/test-mail.mjs'
+    volumes:
+      - '${mailStub.replaceAll('\\', '/')}:/opt/test-mail.mjs:ro'
   proxy:
     ports: !override ['127.0.0.1:18080:80', '127.0.0.1:18443:443']
   backup:
@@ -97,7 +116,7 @@ try {
   const cert = resolve(dir, 'local-ca.crt');
   await docker('cp', `${proxyId}:/data/caddy/pki/authorities/local/root.crt`, cert);
   const result = await exec(process.execPath, ['scripts/verify-production-client.mjs'], {
-    env: { ...process.env, NODE_EXTRA_CA_CERTS: cert },
+    env: { ...process.env, NODE_EXTRA_CA_CERTS: cert, UML_TEST_COMPOSE_ARGS: JSON.stringify(args) },
     maxBuffer: 1024 * 1024,
   });
   console.warn(result.stdout || result.stderr);

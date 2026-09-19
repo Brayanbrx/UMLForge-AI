@@ -7,13 +7,14 @@ import {
   register as registerRequest,
   setAccessToken,
   type SessionUser,
+  type RegistrationResponse,
 } from '../../lib/api.js';
 
 interface SessionValue {
   readonly user: SessionUser | null;
   readonly loading: boolean;
   login(email: string, password: string): Promise<void>;
-  register(email: string, displayName: string, password: string): Promise<void>;
+  register(email: string, displayName: string, password: string): Promise<RegistrationResponse>;
   logout(): Promise<void>;
   /**
    * Refresca el usuario de la sesion tras editar el perfil.
@@ -57,8 +58,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }): Re
       user,
       loading,
       login: async (email, password) => setUser(await loginRequest(email, password)),
-      register: async (email, displayName, password) =>
-        setUser(await registerRequest(email, displayName, password)),
+      register: registerRequest,
       logout: async () => {
         await logoutRequest();
         setAccessToken(null);

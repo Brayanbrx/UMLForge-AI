@@ -45,9 +45,14 @@ export const securityPlugin = fp(
       await enforceLimit(general, request, reply);
       if (
         request.method === 'POST' &&
-        ['/auth/login', '/auth/register', '/auth/password/forgot', '/auth/password/reset'].includes(
-          path ?? '',
-        )
+        [
+          '/auth/login',
+          '/auth/register',
+          '/auth/password/forgot',
+          '/auth/password/reset',
+          '/auth/verification/resend',
+          '/auth/verification/confirm',
+        ].includes(path ?? '')
       ) {
         await enforceLimit(authentication, request, reply);
       }

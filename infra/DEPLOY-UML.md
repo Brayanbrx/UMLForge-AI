@@ -62,6 +62,19 @@ El script obtiene el commit para etiquetar imágenes, valida la configuración, 
 
 ## 4. Comprobar el despliegue real
 
+Los nuevos registros requieren activar la cuenta por correo antes de iniciar sesión.
+Brevo envía un enlace a `https://uml.asiscarretera.online/activar#token=…`, válido
+durante 24 horas y de un solo uso. La pantalla de acceso permite reenviarlo (máximo
+un envío por minuto por cuenta, además del límite por IP). La migración conserva
+el acceso de las cuentas anteriores. Si falla el envío inicial, la cuenta queda
+pendiente y la interfaz permite solicitar otro enlace.
+
+Comprueba la entrega real en Brevo y en el buzón antes de abrir el registro público:
+una clave configurada no garantiza que el proveedor acepte el envío desde la VM.
+En desarrollo, `MAIL_PROVIDER=log` escribe el enlace en los logs de la API.
+Las pruebas E2E locales usan ese adaptador; la prueba de producción captura los
+correos en un adaptador temporal sin enviar mensajes reales.
+
 Abre `https://uml.asiscarretera.online`. Confirma registro/login, recarga de sesión, dos usuarios con estado **En vivo**, descarga PNG/ZIP y recuperación de contraseña con entrega real del correo y enlace al subdominio correcto.
 
 ```bash

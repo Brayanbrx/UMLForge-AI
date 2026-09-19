@@ -3,7 +3,9 @@ import { Prisma } from '@prisma/client';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Config } from '../../config.js';
-import { conflict, unauthorized } from '../../lib/http-error.js';
+import { HttpError, conflict, unauthorized } from '../../lib/http-error.js';
+import type { MailPort } from '../../lib/mail.js';
+import { sendVerification } from './verification.js';
 import { REFRESH_COOKIE, currentUser } from '../../plugins/auth.js';
 import { hashPassword, verifyPassword } from './passwords.js';
 import { createRefreshToken, hashRefreshToken } from './tokens.js';
@@ -22,16 +24,13 @@ const loginBody = z.object({
 /**
  * Sesion: registro, inicio, renovacion y cierre (RF-A01 a RF-A03).
  *
- * Alcance minimo y deliberado. No hay verificacion por correo ni inicio de
- * sesion con terceros: cada uno arrastraria un tercero al camino critico.
- *
- * La recuperacion de contrasena si existe desde el 31 de agosto de 2026, y vive
- * en `profile.ts`. Lo que la hizo posible sin romper esa regla es que el envio
- * esta detras de un puerto: el adaptador por defecto escribe el correo en el
- * registro del servidor, asi que la plataforma sigue arrancando y funcionando
- * sin ninguna cuenta de correo configurada.
+ * El registro requiere activar el correo antes de emitir una sesión.
+ * En desarrollo MAIL_PROVIDER=log permite leer el enlace en el servidor.
  */
-export async function authRoutes(app: FastifyInstance, options: { config: Config }): Promise<void> {
+export async function authRoutes(
+  app: FastifyInstance,
+  options: { config: Config; mail: MailPort },
+): Promise<void> {
   const { config } = options;
 
   const cookieOptions = {
@@ -54,7 +53,7 @@ export async function authRoutes(app: FastifyInstance, options: { config: Config
       // Serializa emisión y cambio de contraseña sobre la misma fila. Un login
       // o refresh iniciado antes de la revocación no puede crear otra sesión después.
       const current = await tx.user.updateMany({
-        where: { id: user.id, sessionVersion: user.sessionVersion },
+        where: { id: user.id, sessionVersion: user.sessionVersion, emailVerifiedAt: { not: null } },
         data: { sessionVersion: user.sessionVersion },
       });
       if (current.count !== 1) throw unauthorized('La sesión fue revocada.');
@@ -121,7 +120,8 @@ export async function authRoutes(app: FastifyInstance, options: { config: Config
     }
 
     reply.code(201);
-    return issueSession(reply, user);
+    const emailSent = await sendVerification(app, config, options.mail, user);
+    return { verificationRequired: true, emailSent };
   });
 
   app.post('/auth/login', async (request, reply) => {
@@ -138,6 +138,14 @@ export async function authRoutes(app: FastifyInstance, options: { config: Config
 
     if (user === null || !valid) {
       throw unauthorized('Correo o contrasena incorrectos.');
+    }
+
+    if (user.emailVerifiedAt === null) {
+      throw new HttpError(
+        403,
+        'email_not_verified',
+        'Activa tu cuenta desde el enlace del correo. Si no llegó, solicita otro enlace de activación.',
+      );
     }
 
     return issueSession(reply, user);

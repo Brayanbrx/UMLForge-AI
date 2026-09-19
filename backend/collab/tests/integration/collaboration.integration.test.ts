@@ -81,6 +81,23 @@ describe('sesion colaborativa', () => {
   }
 
   /** Espera hasta que la condicion se cumpla, o falla. */
+  it('rechaza una cuenta pendiente aunque presente un JWT firmado y tenga membresía', async () => {
+    const separate = await seedProject(collab.prisma, JWT_SECRET);
+    await collab.prisma.user.update({
+      where: { id: separate.editorId },
+      data: { emailVerifiedAt: null },
+    });
+    const { authorizeConnection } = await import('../../src/auth/authorize.js');
+    await expect(
+      authorizeConnection({
+        prisma: collab.prisma,
+        jwtSecret: new TextEncoder().encode(JWT_SECRET),
+        documentName: separate.room,
+        token: separate.editorToken,
+      }),
+    ).rejects.toMatchObject({ reason: 'token-invalido' });
+  });
+
   it('cierra una conexion inactiva revocada y rechaza reconectar con el JWT anterior', async () => {
     const separate = await seedProject(collab.prisma, JWT_SECRET);
     const client = await conectar(separate.room, separate.editorToken);
@@ -478,6 +495,7 @@ describe('sesion colaborativa', () => {
         data: {
           email: `carga-${crypto.randomUUID()}@example.com`,
           displayName: 'Participante',
+          emailVerifiedAt: new Date(),
           passwordHash: 'no-se-usa',
           memberships: { create: { projectId: local.projectId, role: 'EDITOR' } },
         },

@@ -127,9 +127,9 @@ export async function authorizeConnection(
 
   const user = await options.prisma.user.findUnique({
     where: { id: userId },
-    select: { sessionVersion: true },
+    select: { sessionVersion: true, emailVerifiedAt: true },
   });
-  if (user === null || user.sessionVersion !== sessionVersion) {
+  if (user === null || user.emailVerifiedAt === null || user.sessionVersion !== sessionVersion) {
     throw new UnauthorizedConnection(
       CONNECTION_REJECTIONS.TOKEN_INVALIDO,
       'La sesión fue revocada.',

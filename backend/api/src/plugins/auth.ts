@@ -50,9 +50,13 @@ export const authPlugin = fp(
       const claims = await tokens.verifyAccessToken(header.slice('Bearer '.length));
       const user = await app.prisma.user.findUnique({
         where: { id: claims.userId },
-        select: { sessionVersion: true },
+        select: { sessionVersion: true, emailVerifiedAt: true },
       });
-      if (user === null || user.sessionVersion !== claims.sessionVersion) {
+      if (
+        user === null ||
+        user.emailVerifiedAt === null ||
+        user.sessionVersion !== claims.sessionVersion
+      ) {
         throw unauthorized('La sesión fue revocada. Inicia sesión nuevamente.');
       }
       request.user = claims;

@@ -6,6 +6,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { loadConfig, type Config } from './config.js';
 import { HttpError } from './lib/http-error.js';
+import { createMailPort, type MailPort } from './lib/mail.js';
+import { verificationRoutes } from './modules/auth/verification.js';
 import { aiRoutes } from './modules/ai/routes.js';
 import { auditRoutes } from './modules/audit/routes.js';
 import { profileRoutes } from './modules/auth/profile.js';
@@ -25,7 +27,10 @@ export const SERVICE_NAME = 'api';
  * Construye la aplicacion sin escucharla. Separar construccion de escucha es lo
  * que permite probarla por inyeccion, sin abrir un puerto.
  */
-export async function buildApp(config: Config = loadConfig()): Promise<FastifyInstance> {
+export async function buildApp(
+  config: Config = loadConfig(),
+  options: { mail?: MailPort } = {},
+): Promise<FastifyInstance> {
   const app = Fastify({
     // RNF-14: registro estructurado. Los campos de proyecto, pizarra, sesion,
     // lote, comando, generacion, actor y origen se anaden por peticion en las
@@ -90,8 +95,20 @@ export async function buildApp(config: Config = loadConfig()): Promise<FastifyIn
   // de «¿pero esto esta usando el simulado?» en mitad de una demostracion.
   app.log.info({ cadenas: describeAiChains(aiConfig) }, 'capa de IA');
 
-  await app.register(authRoutes, { config });
-  await app.register(profileRoutes, { config });
+  const mail =
+    options.mail ??
+    createMailPort(
+      {
+        provider: config.MAIL_PROVIDER,
+        from: config.MAIL_FROM,
+        fromName: config.MAIL_FROM_NAME,
+        brevoApiKey: config.BREVO_API_KEY,
+      },
+      app.log,
+    );
+  await app.register(authRoutes, { config, mail });
+  await app.register(verificationRoutes, { config, mail });
+  await app.register(profileRoutes, { config, mail });
   await app.register(projectRoutes, { config });
   await app.register(boardRoutes);
   await app.register(aiRoutes, { ports: aiPorts });

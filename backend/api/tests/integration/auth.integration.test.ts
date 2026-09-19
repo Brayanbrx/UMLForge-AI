@@ -13,17 +13,20 @@ describe('sesion', () => {
     await api?.stop();
   });
 
-  it('RF-A01 — registra una cuenta y devuelve token y cookie de refresco', async () => {
+  it('RF-A01 — registra una cuenta pendiente sin emitir sesión y envía activación', async () => {
     const respuesta = await api.request('POST', '/auth/register', {
       body: { email: 'ana@example.com', displayName: 'Ana', password: 'contrasena-larga' },
     });
 
     expect(respuesta.status).toBe(201);
-    expect(respuesta.body.user).toMatchObject({ email: 'ana@example.com', displayName: 'Ana' });
-    expect(typeof respuesta.body.accessToken).toBe('string');
-
-    const cookie = respuesta.cookies.find((item) => item.name === 'uml_refresh');
-    expect(cookie).toBeDefined();
+    expect(respuesta.body).toEqual({ verificationRequired: true, emailSent: true });
+    expect(respuesta.cookies).toHaveLength(0);
+    const denied = await api.request('POST', '/auth/login', {
+      body: { email: 'ana@example.com', password: 'contrasena-larga' },
+    });
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe('email_not_verified');
+    await api.activate('ana@example.com');
   });
 
   it('nunca devuelve el hash de la contrasena', async () => {
@@ -101,17 +104,14 @@ describe('sesion', () => {
   });
 
   it('RF-A03 — renueva la sesion y rota el token de refresco', async () => {
-    const registro = await api.request('POST', '/auth/register', {
-      body: { email: 'rota@example.com', displayName: 'Rota', password: 'contrasena-larga' },
-    });
-    const primera = registro.cookies.find((item) => item.name === 'uml_refresh');
-    const cookieInicial = `uml_refresh=${primera?.value ?? ''}`;
+    const registro = await api.signUp('rota@example.com');
+    const cookieInicial = registro.cookie;
 
     const renovacion = await api.request('POST', '/auth/refresh', { cookie: cookieInicial });
     expect(renovacion.status).toBe(200);
 
     const segunda = renovacion.cookies.find((item) => item.name === 'uml_refresh');
-    expect(segunda?.value).not.toBe(primera?.value);
+    expect(`uml_refresh=${segunda?.value}`).not.toBe(cookieInicial);
 
     // Reutilizar el token ya rotado no funciona.
     const reutilizacion = await api.request('POST', '/auth/refresh', { cookie: cookieInicial });

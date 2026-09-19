@@ -82,7 +82,7 @@ async function cuenta(datos: (typeof CUENTAS)[number]): Promise<Sesion> {
   if (acceso === null) {
     throw new Error(
       `No se pudo crear ni abrir la cuenta ${datos.email}. ` +
-        'Comprueba que el entorno esta levantado: npm run up',
+        'Activa la cuenta desde el correo (o los logs de API con MAIL_PROVIDER=log) y vuelve a ejecutar npm run seed.',
     );
   }
   return acceso;
@@ -97,7 +97,10 @@ async function intentar(ruta: string, cuerpo: object): Promise<Sesion | null> {
 
   if (!respuesta.ok) return null;
 
-  const datos = (await respuesta.json()) as Omit<Sesion, 'cookie'>;
+  const datos = (await respuesta.json()) as Omit<Sesion, 'cookie'> & {
+    verificationRequired?: boolean;
+  };
+  if (datos.verificationRequired) return null;
   return { ...datos, cookie: respuesta.headers.get('set-cookie') ?? '' };
 }
 

@@ -3,6 +3,7 @@ import { lazy, Suspense, useLayoutEffect } from 'react';
 import { LoginPage } from './features/auth/LoginPage.js';
 import { ProfilePage } from './features/auth/ProfilePage.js';
 import { ResetPage } from './features/auth/ResetPage.js';
+import { VerificationPage } from './features/auth/VerificationPage.js';
 import { SessionProvider, useSession } from './features/auth/session.js';
 import { ProjectPage, ProjectsPage } from './features/projects/ProjectsPage.js';
 import { InteractiveTourProvider } from './features/help/InteractiveTour.js';
@@ -61,6 +62,7 @@ function Rutas(): React.JSX.Element {
     return (
       <Routes>
         <Route path="/entrar" element={<LoginPage />} />
+        <Route path="/activar" element={<VerificationPage />} />
         {/* Restablecer se llega desde el correo, sin sesion: tiene que existir
             tambien para quien no ha entrado. */}
         <Route path="/restablecer" element={<ResetPage />} />
@@ -73,6 +75,7 @@ function Rutas(): React.JSX.Element {
     <Routes>
       <Route path="/proyectos" element={<ProjectsPage />} />
       <Route path="/cuenta" element={<ProfilePage />} />
+      <Route path="/activar" element={<VerificationPage />} />
       <Route path="/restablecer" element={<ResetPage />} />
       <Route path="/proyectos/:projectId" element={<ProjectPage />} />
       <Route path="/pizarras/:boardId" element={<BoardPage />} />

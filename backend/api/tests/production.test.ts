@@ -114,6 +114,13 @@ describe('production safeguards', () => {
     expect((await send('fake-b, 192.0.2.1')).statusCode).toBe(429);
     expect((await send('fake-a, 192.0.2.2')).statusCode).toBe(400);
   });
+  it('applies the shared authentication rate limit to activation and resend', async () => {
+    app = await buildApp(loadConfig(base));
+    const send = (url: string) => app!.inject({ method: 'POST', url, payload: {} });
+    expect((await send('/auth/verification/confirm')).statusCode).toBe(400);
+    expect((await send('/auth/verification/resend')).statusCode).toBe(400);
+    expect((await send('/auth/verification/resend')).statusCode).toBe(429);
+  });
   it('shares work quota across boards and IPs for the same authenticated user', async () => {
     app = await buildApp(loadConfig(base));
     vi.spyOn(app.prisma.user, 'findUnique').mockResolvedValue({ sessionVersion: 0 } as never);

@@ -150,20 +150,37 @@ export async function login(email: string, password: string): Promise<SessionUse
   return sesion.user;
 }
 
+export interface RegistrationResponse {
+  readonly verificationRequired: true;
+  readonly emailSent: boolean;
+}
+
 export async function register(
   email: string,
   displayName: string,
   password: string,
-): Promise<SessionUser> {
-  const sesion = await apiRequest<SessionResponse>('/auth/register', {
+): Promise<RegistrationResponse> {
+  return apiRequest<RegistrationResponse>('/auth/register', {
     method: 'POST',
     body: { email, displayName, password },
     skipRefresh: true,
   });
-  setAccessToken(sesion.accessToken);
-  sessionUserId = sesion.user.id;
-  return sesion.user;
 }
+
+export const verification = {
+  resend: (email: string) =>
+    apiRequest<{ sent: true }>('/auth/verification/resend', {
+      method: 'POST',
+      body: { email },
+      skipRefresh: true,
+    }),
+  confirm: (token: string) =>
+    apiRequest<{ verified: true }>('/auth/verification/confirm', {
+      method: 'POST',
+      body: { token },
+      skipRefresh: true,
+    }),
+};
 
 export async function logout(): Promise<void> {
   signingOut = true;

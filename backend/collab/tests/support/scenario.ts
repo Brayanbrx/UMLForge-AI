@@ -32,7 +32,12 @@ export async function seedProject(prisma: PrismaClient, jwtSecret: string): Prom
 
   const crearUsuario = async (email: string): Promise<string> => {
     const user = await prisma.user.create({
-      data: { email, displayName: email.split('@')[0] as string, passwordHash: 'no-se-usa' },
+      data: {
+        email,
+        displayName: email.split('@')[0] as string,
+        passwordHash: 'no-se-usa',
+        emailVerifiedAt: new Date(),
+      },
       select: { id: true },
     });
     return user.id;

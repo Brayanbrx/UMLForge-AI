@@ -37,6 +37,10 @@ model User {
   passwordHash   String
   sessionVersion Int      @default(0)
   createdAt      DateTime @default(now())
+  emailVerifiedAt DateTime?
+  emailVerificationTokenHash String? @unique
+  emailVerificationExpiresAt DateTime?
+  emailVerificationSentAt DateTime?
 
   // Foto de perfil. Se guarda en la base y no en disco ni en almacenamiento de
   // objetos: la plataforma no tiene ninguno de los dos, y una imagen recortada

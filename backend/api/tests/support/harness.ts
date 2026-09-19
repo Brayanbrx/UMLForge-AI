@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../../src/app.js';
 import { loadConfig } from '../../src/config.js';
+import type { Correo, MailPort } from '../../src/lib/mail.js';
 import { startEphemeralDatabase, type EphemeralDatabase } from './database.js';
 
 /**
@@ -38,6 +39,9 @@ export interface ApiClient {
 }
 
 export interface Harness extends ApiClient {
+  readonly mails: Correo[];
+  readonly mail: MailPort;
+  activate(email: string): Promise<void>;
   stop(): Promise<void>;
   /** Crea una cuenta y devuelve su token de acceso y su identificador. */
   signUp(
@@ -50,6 +54,13 @@ export async function startHarness(): Promise<Harness> {
   let database: EphemeralDatabase | undefined;
   let app: FastifyInstance | undefined;
   let collab: Server | undefined;
+  const mails: Correo[] = [];
+  const mail: MailPort = {
+    name: 'test',
+    async send(message) {
+      mails.push(message);
+    },
+  };
 
   try {
     database = await startEphemeralDatabase();
@@ -62,20 +73,41 @@ export async function startHarness(): Promise<Harness> {
         JWT_SECRET: 'secreto-de-pruebas-con-mas-de-treinta-y-dos-caracteres',
         COLLAB_INTERNAL_URL: `http://127.0.0.1:${(collab.address() as AddressInfo).port}`,
       }),
+      { mail },
     );
 
     const client = makeClient(app);
+    const activate = async (email: string): Promise<void> => {
+      const message = mails.findLast(
+        (item) => item.to === email.toLowerCase() && item.subject.startsWith('Activa'),
+      );
+      const token = message?.text.match(/#token=([^\s]+)/)?.[1];
+      if (!token) throw new Error('No llegó el correo de activación de prueba');
+      const result = await client.request('POST', '/auth/verification/confirm', {
+        body: { token },
+      });
+      if (result.status !== 200) throw new Error('No se pudo activar la cuenta de prueba');
+    };
 
     return {
       ...client,
+      mails,
+      mail,
+      activate,
       async signUp(email, password = 'contrasena-de-prueba') {
-        const respuesta = await client.request('POST', '/auth/register', {
+        const registro = await client.request('POST', '/auth/register', {
           body: { email, displayName: email.split('@')[0], password },
         });
 
-        if (respuesta.status !== 201) {
-          throw new Error(`No se pudo registrar ${email}: ${JSON.stringify(respuesta.body)}`);
+        if (registro.status !== 201) {
+          throw new Error(`No se pudo registrar ${email}: ${JSON.stringify(registro.body)}`);
         }
+
+        await activate(email);
+        const respuesta = await client.request('POST', '/auth/login', {
+          body: { email, password },
+        });
+        if (respuesta.status !== 200) throw new Error('No se pudo iniciar sesión tras activar');
 
         const cookie = respuesta.cookies.find((item) => item.name === 'uml_refresh');
 
