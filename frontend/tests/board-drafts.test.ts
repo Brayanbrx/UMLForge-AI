@@ -47,6 +47,52 @@ function createClass(name: string): CommandBatch {
 }
 
 describe('copia local del editor', () => {
+  it('abre una pizarra visitada sin ediciones y conserva actualizaciones remotas', () => {
+    const storage = new MemoryStorage();
+    const doc = new Y.Doc();
+    const drafts = new BoardDrafts(storage, 'ana', 'ventas');
+    drafts.snapshot(doc);
+    const empty = new Y.Doc();
+    expect(drafts.openOffline(empty, false)).toBe(true);
+    new BoardDrafts(new MemoryStorage(), 'beto', 'ventas').apply(doc, createClass('Remota'));
+    drafts.snapshot(doc);
+    const reopened = new Y.Doc();
+    expect(drafts.openOffline(reopened, false)).toBe(true);
+    expect(readBoardState(reopened).semantic.classes[0]?.displayName).toBe('Remota');
+    expect(new BoardDrafts(storage, 'otro', 'ventas').openOffline(new Y.Doc(), true)).toBe(false);
+    doc.destroy();
+    empty.destroy();
+    reopened.destroy();
+  });
+
+  it('un lector abre el estado autorizado sin mezclar antiguos borradores de edición', () => {
+    const storage = new MemoryStorage();
+    const drafts = new BoardDrafts(storage, 'ana', 'ventas');
+    const local = new Y.Doc();
+    drafts.apply(local, createClass('Pendiente'));
+    const authorized = new Y.Doc();
+    drafts.snapshot(authorized);
+    const reader = new Y.Doc();
+    drafts.openOffline(reader, false);
+    expect(readBoardState(reader).semantic.classes).toEqual([]);
+    const editor = new Y.Doc();
+    drafts.openOffline(editor, true);
+    expect(readBoardState(editor).semantic.classes[0]?.displayName).toBe('Pendiente');
+    local.destroy();
+    authorized.destroy();
+    reader.destroy();
+    editor.destroy();
+  });
+
+  it('no abre una instantánea corrupta como si fuera una pizarra vacía editable', () => {
+    const storage = new MemoryStorage();
+    storage.setItem('uml_board_snapshot_v1:ana:ventas', 'not-base64!');
+    const doc = new Y.Doc();
+    expect(() => new BoardDrafts(storage, 'ana', 'ventas').openOffline(doc, true)).toThrow();
+    expect(readBoardState(doc).semantic.classes).toEqual([]);
+    doc.destroy();
+  });
+
   it('una copia antigua no resucita una clase eliminada por otro participante', () => {
     const storage = new MemoryStorage();
     const doc = new Y.Doc();

@@ -4,11 +4,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   api,
+  ApiError,
+  isConnectionUnavailable,
   flushAuditQueue,
   pendingAuditCount,
   subscribeAuditQueue,
-  type BoardSummary,
-  type ProjectRole,
 } from '../../lib/api.js';
 import { useSession } from '../auth/session.js';
 import { AssistantPanel } from '../assistant/AssistantPanel.js';
@@ -23,6 +23,7 @@ import { isRelationshipTool, relationshipKindFor, type EditorTool } from './edit
 import { useBoardDocument } from './useBoardDocument.js';
 import { ThemeSelect } from '../../components/ThemeProvider.js';
 import { SoftwareGuide } from '../help/SoftwareGuide.js';
+import { cachedBoard, forgetBoard, type OfflineBoard } from '../../lib/offline.js';
 
 type Herramienta = 'asistente' | 'importar' | 'generar';
 
@@ -41,6 +42,14 @@ const ESTADO_CONEXION = {
 
 export function BoardPage(): React.JSX.Element {
   const { boardId } = useParams<{ boardId: string }>();
+  const { user } = useSession();
+  const [selection, setSelection] = useState<{ boardId: string; id: string | null } | null>(null);
+  const select = useCallback(
+    (id: string | null) => {
+      if (boardId !== undefined) setSelection({ boardId, id });
+    },
+    [boardId],
+  );
 
   if (boardId === undefined) {
     return (
@@ -57,17 +66,142 @@ export function BoardPage(): React.JSX.Element {
   // React conserva el componente cuando solo cambia un parametro de ruta. La
   // clave fuerza una sesion nueva y, con ella, un Y.Doc nuevo: el contenido de
   // una pizarra nunca puede viajar a la siguiente por reutilizar el hook.
-  return <BoardSession key={boardId} boardId={boardId} />;
+  return (
+    <BoardLoader
+      key={`${user?.id}:${boardId}`}
+      boardId={boardId}
+      selectedId={selection?.boardId === boardId ? selection.id : null}
+      setSelectedId={select}
+    />
+  );
 }
 
-function BoardSession({ boardId }: { readonly boardId: string }): React.JSX.Element {
-  const { user, logout } = useSession();
+interface BoardSelectionProps {
+  readonly boardId: string;
+  readonly selectedId: string | null;
+  readonly setSelectedId: (id: string | null) => void;
+}
 
-  const [board, setBoard] = useState<(BoardSummary & { role: ProjectRole }) | null>(null);
+/** Keep the local editor mounted until both the session and board API recover. */
+function BoardLoader(props: BoardSelectionProps): React.JSX.Element {
+  const { user, offline: sessionOffline } = useSession();
+  const [board, setBoard] = useState<OfflineBoard | null>(null);
+  const [offline, setOffline] = useState(sessionOffline);
   const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user === null) return;
+    let active = true;
+    let inFlight = false;
+    let retry = false;
+    const controller = new AbortController();
+    const openLocal = (): void => {
+      const local = cachedBoard(user.id, props.boardId);
+      if (local === null) {
+        setError('Esta pizarra no está disponible sin conexión. Ábrela con conexión primero.');
+      } else {
+        setBoard(local);
+        setOffline(true);
+        setError(null);
+      }
+    };
+    const load = async (): Promise<void> => {
+      if (!active || inFlight) return;
+      if (sessionOffline) {
+        openLocal();
+        return;
+      }
+      inFlight = true;
+      try {
+        const remote = await api.getBoard(
+          props.boardId,
+          AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]),
+        );
+        if (!active) return;
+        setBoard(remote);
+        setOffline(false);
+        setError(null);
+        retry = false;
+      } catch (cause) {
+        if (!active) return;
+        if (isConnectionUnavailable(cause)) {
+          retry = true;
+          openLocal();
+        } else {
+          retry = false;
+          if (cause instanceof ApiError && [403, 404].includes(cause.status))
+            forgetBoard(user.id, props.boardId);
+          setBoard(null);
+          setError(cause instanceof Error ? cause.message : 'No se pudo abrir la pizarra.');
+        }
+      } finally {
+        inFlight = false;
+      }
+    };
+    void load();
+    const reconnect = (): void => {
+      if (retry && navigator.onLine) void load();
+    };
+    const timer = window.setInterval(reconnect, 5000);
+    window.addEventListener('online', reconnect);
+    window.addEventListener('focus', reconnect);
+    return () => {
+      active = false;
+      controller.abort();
+      window.clearInterval(timer);
+      window.removeEventListener('online', reconnect);
+      window.removeEventListener('focus', reconnect);
+    };
+  }, [props.boardId, user, sessionOffline]);
+
+  if (error !== null)
+    return (
+      <main className="centrado">
+        <div className="estado-ruta" role="alert">
+          <h1>No se pudo abrir la pizarra</h1>
+          <p className="error">{error}</p>
+          <Link to="/proyectos">Volver a mis proyectos</Link>
+        </div>
+      </main>
+    );
+  if (board === null)
+    return (
+      <main className="centrado">
+        <div className="estado-ruta" role="status">
+          <div className="girando" aria-hidden="true" />
+          <p>Abriendo la pizarra…</p>
+        </div>
+      </main>
+    );
+  return <BoardSession key={String(offline)} {...props} board={board} offline={offline} />;
+}
+
+function BoardSession({
+  boardId,
+  selectedId,
+  setSelectedId,
+  board,
+  offline,
+}: BoardSelectionProps & {
+  readonly board: OfflineBoard;
+  readonly offline: boolean;
+}): React.JSX.Element {
+  const { user, logout } = useSession();
+  const [shellReady, setShellReady] = useState(false);
+  useEffect(() => {
+    if (!import.meta.env.PROD || !('serviceWorker' in navigator) || !window.isSecureContext) return;
+    let active = true;
+    void navigator.serviceWorker.ready.then(() => {
+      if (active) setShellReady(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const [rechazo, setRechazo] = useState<string | null>(null);
-  const [auditoriasPendientes, setAuditoriasPendientes] = useState(pendingAuditCount);
+  const userId = user?.id ?? null;
+  const [auditoriasPendientes, setAuditoriasPendientes] = useState(() => pendingAuditCount(userId));
   const [activeTool, setActiveTool] = useState<EditorTool>('SELECT');
   const [relationshipSourceId, setRelationshipSourceId] = useState<string | null>(null);
   const [classToRevealId, setClassToRevealId] = useState<string | null>(null);
@@ -80,14 +214,9 @@ function BoardSession({ boardId }: { readonly boardId: string }): React.JSX.Elem
   const [herramienta, setHerramienta] = useState<Herramienta>('asistente');
 
   useEffect(() => {
-    api
-      .getBoard(boardId)
-      .then(setBoard)
-      .catch((causa: unknown) => setError(causa instanceof Error ? causa.message : 'Error'));
-  }, [boardId]);
-
-  useEffect(() => {
-    const cancelar = subscribeAuditQueue(setAuditoriasPendientes);
+    const updateCount = (): void => setAuditoriasPendientes(pendingAuditCount(userId));
+    const cancelar = subscribeAuditQueue(updateCount);
+    updateCount();
     const reintentar = (): void => void flushAuditQueue().catch(() => undefined);
     window.addEventListener('online', reintentar);
     reintentar();
@@ -95,9 +224,9 @@ function BoardSession({ boardId }: { readonly boardId: string }): React.JSX.Elem
       cancelar();
       window.removeEventListener('online', reintentar);
     };
-  }, []);
+  }, [userId]);
 
-  const documento = useBoardDocument(board?.room ?? null, user, boardId);
+  const documento = useBoardDocument(board?.room ?? null, user, boardId, offline, board);
   const canWrite = documento.canWrite;
 
   const run = useCallback(
@@ -236,38 +365,25 @@ function BoardSession({ boardId }: { readonly boardId: string }): React.JSX.Elem
   // es estado local de interfaz: se limpia en cuanto el documento confirma que
   // la clase o relacion ya no existe.
   useEffect(() => {
-    if (selectedId === null) return;
+    if (
+      selectedId === null ||
+      board === null ||
+      (documento.state.semantic.classes.length === 0 && documento.status === 'conectando')
+    )
+      return;
 
     const sigueExistiendo =
       documento.state.semantic.classes.some((item) => item.id === selectedId) ||
       documento.state.semantic.relationships.some((item) => item.id === selectedId);
     if (!sigueExistiendo) setSelectedId(null);
-  }, [documento.state.semantic.classes, documento.state.semantic.relationships, selectedId]);
-
-  if (error !== null) {
-    return (
-      <main className="centrado">
-        <div className="estado-ruta" role="alert">
-          <h1>No se pudo abrir la pizarra</h1>
-          {/* El mensaje del servidor tal cual: distingue «no existe» de «no
-              eres miembro», y es lo que una prueba comprueba. */}
-          <p className="error">{error}</p>
-          <Link to="/proyectos">Volver a mis proyectos</Link>
-        </div>
-      </main>
-    );
-  }
-
-  if (board === null) {
-    return (
-      <main className="centrado">
-        <div className="estado-ruta" role="status">
-          <div className="girando" aria-hidden="true" />
-          <p>Abriendo la pizarra…</p>
-        </div>
-      </main>
-    );
-  }
+  }, [
+    documento.state.semantic.classes,
+    documento.state.semantic.relationships,
+    documento.status,
+    board,
+    selectedId,
+    setSelectedId,
+  ]);
 
   return (
     <div className="editor">
@@ -354,6 +470,11 @@ function BoardSession({ boardId }: { readonly boardId: string }): React.JSX.Elem
           <span className={`conexion ${documento.status}`} data-testid="estado-conexion">
             {ESTADO_CONEXION[documento.status]}
           </span>
+          {shellReady && documento.offlineReady && !offline && (
+            <span className="conexion" data-testid="offline-disponible">
+              Disponible sin conexión
+            </span>
+          )}
 
           {auditoriasPendientes > 0 && (
             <span
@@ -408,6 +529,13 @@ function BoardSession({ boardId }: { readonly boardId: string }): React.JSX.Elem
       {documento.status === 'rechazado' && (
         <p className="error banda">
           El servidor rechazó la conexión: {documento.rejection ?? 'sin motivo'}
+        </p>
+      )}
+      {offline && (
+        <p className="advertencia banda" role="status" data-testid="modo-offline">
+          Estás trabajando con una copia local. Al volver la conexión se comprobarán tus permisos y
+          se sincronizarán los cambios. El asistente y la generación requieren conexión.{' '}
+          <Link to="/proyectos">Ver pizarras guardadas</Link>
         </p>
       )}
       {rechazo !== null && (

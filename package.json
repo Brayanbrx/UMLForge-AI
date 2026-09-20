@@ -41,6 +41,7 @@
     "bank:report": "npm run report --workspace @uml/fixtures",
     "test:api": "vitest run --config config/vitest.integration.config.ts",
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
+    "test:offline": "npm run build --workspace @uml/web && playwright test --config e2e/offline/playwright.config.ts",
     "test:production": "node scripts/verify-production.mjs",
     "e2e:install": "playwright install --with-deps chromium",
     "test:bank": "tsx shared/generator-backend/tests/verify-bank.ts",

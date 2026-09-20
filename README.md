@@ -28,6 +28,8 @@ entorno HTTPS en contenedores temporales.
 
 ### Aprender a usar el software
 
+El editor permite abrir y recargar pizarras visitadas sin conexión. Abre la versión compilada con conexión y espera **Disponible sin conexión** en cada pizarra; después podrás editar y sincronizar al reconectar. Consulta [uso, requisitos y límites del editor offline](frontend/OFFLINE.md).
+
 Para descargar el diagrama como imagen, abre **Importar → Exportar imagen PNG**, elige el nombre y pulsa **Guardar PNG**. Incluye clases y relaciones fuera de la vista, conserva el tema actual y permite exportar también con permiso de lectura. Se genera en el navegador; no necesita servicios adicionales en Google Cloud.
 
 Para practicar directamente en la interfaz, abre **Ayuda → Guiarme en esta pantalla**. El recorrido resalta controles reales y muestra instrucciones junto a ellos; detecta escritura y clics, permite ir al control, volver, omitir o pausar con Escape. Continúa cuando navegas de proyectos a una pizarra. **Retomar recorrido interactivo** recupera el último paso guardado para esa pantalla. Puede abrir paneles o pestañas para mostrar controles, pero crear datos, importar y generar requieren acciones del usuario. Los pasos omitidos no certifican que se hayan realizado las operaciones.
@@ -95,6 +97,7 @@ npm run test:api       # integración de la API contra un PostgreSQL efímero
 npm run test:generated # T01: genera, compila con Maven, arranca y ejerce el CRUD
 npm run test:bank      # lo mismo sobre los ocho modelos generables del banco
 npm run test:e2e       # dos navegadores contra el entorno levantado
+npm run test:offline   # producción + pruebas offline con Hocuspocus, sin Docker
 ```
 
 Las pruebas de dos navegadores esperan el adaptador `mock` en los tres puertos de

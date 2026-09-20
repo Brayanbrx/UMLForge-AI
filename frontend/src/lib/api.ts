@@ -1,4 +1,5 @@
 import { commandBatchSchema, type CommandBatch } from '@uml/contracts';
+import { forgetUser, markLogout } from './offline.js';
 
 /**
  * Cliente HTTP de la plataforma.
@@ -35,6 +36,21 @@ let sessionUserId: string | null = null;
 let sessionRevision = 0;
 let refreshInFlight: Promise<boolean> | null = null;
 let signingOut = false;
+let logoutInFlight: Promise<void> | null = null;
+let refreshUnavailable = false;
+
+/** A failed network/server request must not be mistaken for rejected credentials. */
+export function sessionRefreshUnavailable(): boolean {
+  return refreshUnavailable;
+}
+
+export function isConnectionUnavailable(error: unknown): boolean {
+  return (
+    error instanceof TypeError ||
+    (error instanceof ApiError && error.status >= 500) ||
+    (error instanceof Error && error.name === 'TimeoutError')
+  );
+}
 const AUDIT_QUEUE_KEY = 'uml_audit_queue_v1';
 let auditFlushInFlight: Promise<void> | null = null;
 
@@ -140,14 +156,22 @@ interface SessionResponse {
 }
 
 export async function login(email: string, password: string): Promise<SessionUser> {
-  const sesion = await apiRequest<SessionResponse>('/auth/login', {
-    method: 'POST',
-    body: { email, password },
-    skipRefresh: true,
+  // Offline logout immediately shows login. Its delayed response must not clear
+  // the token/cookie of a new login started from that screen.
+  await logoutInFlight;
+  // The promise above only coordinates this tab. The cookie is shared by every
+  // tab, so login must use the same browser lock as logout and token refresh.
+  return withSessionLock(async () => {
+    const sesion = await apiRequest<SessionResponse>('/auth/login', {
+      method: 'POST',
+      body: { email, password },
+      skipRefresh: true,
+    });
+    setAccessToken(sesion.accessToken);
+    sessionUserId = sesion.user.id;
+    markLogout(false);
+    return sesion.user;
   });
-  setAccessToken(sesion.accessToken);
-  sessionUserId = sesion.user.id;
-  return sesion.user;
 }
 
 export interface RegistrationResponse {
@@ -182,16 +206,31 @@ export const verification = {
     }),
 };
 
-export async function logout(): Promise<void> {
+export function logout(): Promise<void> {
+  logoutInFlight ??= performLogout().finally(() => {
+    logoutInFlight = null;
+  });
+  return logoutInFlight;
+}
+
+async function performLogout(): Promise<void> {
   signingOut = true;
+  markLogout(true);
+  forgetUser();
   // Una renovacion que ya estaba en vuelo no debe resucitar esta sesion.
   setAccessToken(null);
   // Esperar tambien su Set-Cookie permite revocar la cookie rotada, incluso
   // cuando la respuesta de refresh llega despues de pulsar Salir.
   await refreshInFlight;
   await withSessionLock(() =>
-    apiRequest<void>('/auth/logout', { method: 'POST', skipRefresh: true }),
-  ).catch(() => undefined);
+    apiRequest<void>('/auth/logout', {
+      method: 'POST',
+      skipRefresh: true,
+      signal: AbortSignal.timeout(8000),
+    }),
+  )
+    .then(() => markLogout(false))
+    .catch(() => undefined);
   setAccessToken(null);
   signingOut = false;
 }
@@ -211,12 +250,14 @@ export function refreshSession(): Promise<boolean> {
 
 async function performRefresh(): Promise<boolean> {
   if (signingOut) return false;
+  refreshUnavailable = false;
   const revision = sessionRevision;
   const previousUserId = sessionUserId;
   try {
     const sesion = await apiRequest<SessionResponse>('/auth/refresh', {
       method: 'POST',
       skipRefresh: true,
+      signal: AbortSignal.timeout(8000),
     });
     if (revision !== sessionRevision) return false;
     if (previousUserId !== null && previousUserId !== sesion.user.id) {
@@ -227,7 +268,8 @@ async function performRefresh(): Promise<boolean> {
     sessionUserId = sesion.user.id;
     void flushAuditQueue().catch(() => undefined);
     return true;
-  } catch {
+  } catch (error) {
+    refreshUnavailable = isConnectionUnavailable(error);
     if (revision === sessionRevision) accessToken = null;
     return false;
   }
@@ -242,8 +284,8 @@ async function withSessionLock<T>(action: () => Promise<T>): Promise<T> {
   return await navigator.locks.request('uml-refresh-session', action);
 }
 
-export async function fetchMe(): Promise<SessionUser> {
-  return apiRequest<SessionUser>('/auth/me');
+export async function fetchMe(signal?: AbortSignal): Promise<SessionUser> {
+  return apiRequest<SessionUser>('/auth/me', signal === undefined ? {} : { signal });
 }
 
 // ---------------------------------------------------------------------------
@@ -405,8 +447,11 @@ export const api = {
       body: { displayName },
     }),
 
-  getBoard: (boardId: string) =>
-    apiRequest<BoardSummary & { role: ProjectRole }>(`/boards/${boardId}`),
+  getBoard: (boardId: string, signal?: AbortSignal) =>
+    apiRequest<BoardSummary & { role: ProjectRole }>(
+      `/boards/${boardId}`,
+      signal === undefined ? {} : { signal },
+    ),
 
   renameBoard: (boardId: string, displayName: string) =>
     apiRequest<BoardSummary>(`/boards/${boardId}`, { method: 'PATCH', body: { displayName } }),
@@ -492,8 +537,8 @@ export function flushAuditQueue(): Promise<void> {
   return auditFlushInFlight;
 }
 
-export function pendingAuditCount(): number {
-  return readAuditQueue().filter((item) => item.batch.actorId === sessionUserId).length;
+export function pendingAuditCount(userId: string | null = sessionUserId): number {
+  return readAuditQueue().filter((item) => item.batch.actorId === userId).length;
 }
 
 export function subscribeAuditQueue(listener: (count: number) => void): () => void {

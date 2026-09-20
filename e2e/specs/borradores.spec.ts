@@ -10,6 +10,7 @@ test('recupera una edicion offline tras cerrar la pestaña y la combina con camb
   try {
     await crearClase(scenario.ana, 'Cliente');
     await expect(scenario.beto.page.getByTestId('clase-Cliente')).toBeVisible();
+    await expect(scenario.ana.page.getByTestId('offline-disponible')).toBeVisible();
     const url = scenario.ana.page.url();
     await context.setOffline(true);
     await expect(scenario.ana.page.getByTestId('estado-conexion')).toHaveText('Sin conexión');
@@ -22,9 +23,13 @@ test('recupera una edicion offline tras cerrar la pestaña y la combina con camb
     await scenario.beto.page.getByTestId('clase-Cliente').click();
     await scenario.beto.page.getByTestId('nuevo-atributo').fill('correo');
     await scenario.beto.page.getByRole('button', { name: 'Añadir', exact: true }).click();
-    await context.setOffline(false);
     const reopened = await context.newPage();
     await reopened.goto(url);
+    await expect(reopened.getByTestId('clase-Cliente')).toContainText('telefono');
+    await expect(reopened.getByTestId('modo-offline')).toBeVisible();
+    await reopened.reload();
+    await expect(reopened.getByTestId('clase-Cliente')).toContainText('telefono');
+    await context.setOffline(false);
     await expect(reopened.getByTestId('estado-conexion')).toHaveText('En vivo');
     for (const page of [reopened, scenario.beto.page]) {
       await expect(page.getByTestId('clase-Cliente')).toContainText('telefono');

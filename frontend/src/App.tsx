@@ -7,6 +7,7 @@ import { VerificationPage } from './features/auth/VerificationPage.js';
 import { SessionProvider, useSession } from './features/auth/session.js';
 import { ProjectPage, ProjectsPage } from './features/projects/ProjectsPage.js';
 import { InteractiveTourProvider } from './features/help/InteractiveTour.js';
+import { OfflineBoardsPage } from './features/editor/OfflineBoardsPage.js';
 
 const BoardPage = lazy(async () => {
   const { BoardPage } = await import('./features/editor/BoardPage.js');
@@ -34,7 +35,7 @@ export function App(): React.JSX.Element {
 }
 
 function Rutas(): React.JSX.Element {
-  const { user, loading } = useSession();
+  const { user, loading, offline } = useSession();
   const { pathname } = useLocation();
 
   useLayoutEffect(() => {
@@ -67,6 +68,15 @@ function Rutas(): React.JSX.Element {
             tambien para quien no ha entrado. */}
         <Route path="/restablecer" element={<ResetPage />} />
         <Route path="*" element={<Navigate to="/entrar" replace />} />
+      </Routes>
+    );
+  }
+
+  if (offline) {
+    return (
+      <Routes>
+        <Route path="/pizarras/:boardId" element={<BoardPage />} />
+        <Route path="*" element={<OfflineBoardsPage />} />
       </Routes>
     );
   }

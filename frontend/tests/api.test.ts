@@ -15,6 +15,36 @@ import {
 import type { CommandBatch } from '@uml/contracts';
 
 describe('cliente HTTP', () => {
+  it('espera un logout pendiente antes de iniciar otra cuenta', async () => {
+    let finishLogout!: (response: Response) => void;
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string) => {
+        calls.push(input);
+        if (input.endsWith('/logout'))
+          return new Promise<Response>((resolve) => {
+            finishLogout = resolve;
+          });
+        return Promise.resolve(
+          jsonResponse(200, {
+            accessToken: 'nuevo-token',
+            user: { id: 'nueva', email: 'nueva@example.com', displayName: 'Nueva' },
+          }),
+        );
+      }),
+    );
+    const leaving = logout();
+    await vi.waitFor(() => expect(calls).toEqual(['/api/auth/logout']));
+    const entering = login('nueva@example.com', 'password');
+    expect(calls).toEqual(['/api/auth/logout']);
+    finishLogout(new Response(null, { status: 204 }));
+    await leaving;
+    await entering;
+    expect(calls).toEqual(['/api/auth/logout', '/api/auth/login']);
+    expect(currentAccessToken()).toBe('nuevo-token');
+  });
+
   afterEach(() => {
     setAccessToken(null);
     vi.unstubAllGlobals();
@@ -206,6 +236,11 @@ describe('cliente HTTP', () => {
       ),
     );
     vi.stubGlobal('fetch', fetchMock);
+    // Offline reload has no API token, but the remembered account still needs
+    // to see its pending count without exposing the other account's queue.
+    expect(pendingAuditCount()).toBe(0);
+    expect(pendingAuditCount(ana)).toBe(1);
+    expect(pendingAuditCount(beto)).toBe(1);
     await login('beto@example.com', 'password');
     expect(pendingAuditCount()).toBe(1);
     await flushAuditQueue();

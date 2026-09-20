@@ -6,6 +6,7 @@ import * as Y from 'yjs';
 export class BoardDrafts {
   private readonly prefix: string;
   private readonly key: string;
+  private readonly snapshotKey: string;
 
   constructor(
     private readonly storage: Storage,
@@ -14,9 +15,31 @@ export class BoardDrafts {
   ) {
     this.prefix = `uml_board_draft_v1:${encodeURIComponent(userId)}:${encodeURIComponent(room)}:`;
     this.key = this.prefix + crypto.randomUUID();
+    this.snapshotKey = `uml_board_snapshot_v1:${encodeURIComponent(userId)}:${encodeURIComponent(room)}`;
   }
 
-  /** Call only after the server has confirmed write access and sent its document. */
+  /** Last authorized server state, also saved for readers and untouched boards. */
+  snapshot(doc: Y.Doc): void {
+    this.storage.setItem(this.snapshotKey, encode(doc));
+  }
+
+  /** Offline replicas never go directly into a provider; reconnect starts clean. */
+  openOffline(doc: Y.Doc, includeDrafts: boolean): boolean {
+    const value = this.storage.getItem(this.snapshotKey);
+    if (value === null) return false;
+    const candidate = new Y.Doc();
+    try {
+      Y.applyUpdate(candidate, decode(value));
+      if (includeDrafts) this.restore(candidate);
+      readBoardState(candidate);
+      Y.applyUpdate(doc, Y.encodeStateAsUpdate(candidate));
+      return true;
+    } finally {
+      candidate.destroy();
+    }
+  }
+
+  /** On a live replica, call only after server write authorization and initial sync. */
   restore(doc: Y.Doc): boolean {
     const entries = this.entries();
     if (entries.length === 0) return false;
@@ -64,15 +87,19 @@ export class BoardDrafts {
   }
 
   private save(doc: Y.Doc, previous: [string, string][]): void {
-    const bytes = Y.encodeStateAsUpdate(doc);
-    let binary = '';
-    for (const byte of bytes) binary += String.fromCharCode(byte);
-    this.storage.setItem(this.key, btoa(binary));
+    this.storage.setItem(this.key, encode(doc));
     for (const [key, value] of previous) {
       // Another tab may have updated its slot since we read it.
       if (key !== this.key && this.storage.getItem(key) === value) this.storage.removeItem(key);
     }
   }
+}
+
+function encode(doc: Y.Doc): string {
+  const bytes = Y.encodeStateAsUpdate(doc);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 function decode(value: string): Uint8Array {

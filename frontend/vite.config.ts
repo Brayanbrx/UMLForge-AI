@@ -1,8 +1,9 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { offlinePlugin } from './tooling/offline-plugin.js';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), offlinePlugin()],
   server: {
     host: true,
     port: 5173,

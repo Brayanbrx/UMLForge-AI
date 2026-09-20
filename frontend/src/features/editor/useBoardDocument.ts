@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Y from 'yjs';
 import { api, currentAccessToken, refreshSession } from '../../lib/api.js';
 import { BoardDrafts } from './board-drafts.js';
+import { forgetBoard, rememberBoard, type OfflineBoard } from '../../lib/offline.js';
 
 /**
  * Enlaza React con el documento colaborativo.
@@ -41,6 +42,7 @@ export interface BoardDocument {
   readonly accessNotice: string | null;
   readonly participants: readonly Participant[];
   readonly canWrite: boolean;
+  readonly offlineReady: boolean;
   /** Aplica un lote. Devuelve los hallazgos si se rechaza. */
   dispatch(
     batch: CommandBatch,
@@ -78,9 +80,12 @@ export function useBoardDocument(
    * para auditoria y no para sincronizar.
    */
   boardId: string | null = null,
+  offline = false,
+  board: OfflineBoard | null = null,
 ): BoardDocument {
   const [doc, setDoc] = useState(() => new Y.Doc());
   const [canWrite, setCanWrite] = useState(false);
+  const [offlineReady, setOfflineReady] = useState(false);
   const writeAllowed = useRef(false);
   const [accessNotice, setAccessNotice] = useState<string | null>(null);
   const [state, setState] = useState<BoardState>(() => emptyBoardState());
@@ -103,6 +108,30 @@ export function useBoardDocument(
       setAccessNotice('El almacenamiento local no está disponible. No se podrán guardar cambios.');
     }
 
+    if (offline) {
+      setStatus('desconectado');
+      try {
+        const writable = board !== null && board.role !== 'VIEWER';
+        if (!draftsRef.current?.openOffline(doc, writable)) throw new Error('No hay copia local');
+        writeAllowed.current = writable;
+        setCanWrite(writable);
+        setOfflineReady(true);
+        setState(readBoardState(doc));
+      } catch {
+        writeAllowed.current = false;
+        setCanWrite(false);
+        setAccessNotice(
+          'No se pudo abrir la copia local. Vuelve a conectarte para recuperar la pizarra.',
+        );
+      }
+      const update = (): void => setState(readBoardState(doc));
+      doc.on('update', update);
+      return () => {
+        doc.off('update', update);
+        draftsRef.current = null;
+      };
+    }
+
     const token = currentAccessToken();
     if (token === null) {
       setStatus('rechazado');
@@ -123,6 +152,47 @@ export function useBoardDocument(
 
     let disposed = false;
     let draftsRestored = false;
+    let serverSynced = false;
+    const restoreDrafts = (): void => {
+      if (
+        disposed ||
+        !serverSynced ||
+        draftsRestored ||
+        !writeAllowed.current ||
+        draftsRef.current === null
+      )
+        return;
+      // Set before applying: applying the update can synchronously emit synced.
+      draftsRestored = true;
+      try {
+        if (draftsRef.current.restore(doc)) {
+          setAccessNotice('Se recuperó la copia local de esta pizarra y se enviará al servidor.');
+        }
+      } catch {
+        writeAllowed.current = false;
+        setCanWrite(false);
+        setAccessNotice(
+          'No se pudo recuperar la copia local. Se conserva intacta; libera espacio o revisa el almacenamiento antes de editar.',
+        );
+      }
+    };
+    const saveSnapshot = (): void => {
+      if (!serverSynced || !provider.isAuthenticated || board === null) return;
+      try {
+        if (draftsRef.current === null) return;
+        draftsRef.current.snapshot(doc);
+        rememberBoard(me.id, {
+          ...board,
+          role: writeAllowed.current ? (board.role === 'OWNER' ? 'OWNER' : 'EDITOR') : 'VIEWER',
+        });
+        setOfflineReady(true);
+      } catch {
+        setOfflineReady(false);
+        setAccessNotice(
+          'No se pudo actualizar la copia para abrir sin conexión. Revisa el espacio del navegador.',
+        );
+      }
+    };
     let lastPermissionWasWrite = writeAllowed.current;
     const permissions = (readOnly: boolean): void => {
       if (disposed) return;
@@ -130,7 +200,10 @@ export function useBoardDocument(
       lastPermissionWasWrite = !readOnly;
       writeAllowed.current = !readOnly;
       setCanWrite(!readOnly);
+      setOfflineReady(false);
+      if (boardId !== null) forgetBoard(me.id, boardId);
       if (lostWriteAccess) {
+        serverSynced = false;
         setAccessNotice(
           'Tu permiso cambió a solo lectura. Se recargó la pizarra desde el servidor; la copia local se conserva y no se enviará sin permiso de edición.',
         );
@@ -140,6 +213,9 @@ export function useBoardDocument(
         // operaciones rechazadas. Una réplica limpia elimina los cambios fantasma.
         setState(emptyBoardState());
         setDoc(new Y.Doc());
+      } else {
+        restoreDrafts();
+        saveSnapshot();
       }
     };
     provider.on('authenticated', ({ scope }: { scope: string }) =>
@@ -172,22 +248,11 @@ export function useBoardDocument(
     let accesoRechazado = false;
     provider.on('synced', () => {
       if (disposed) return;
-      if (!draftsRestored && writeAllowed.current && draftsRef.current !== null) {
-        draftsRestored = true;
-        try {
-          if (draftsRef.current.restore(doc)) {
-            setAccessNotice('Se recuperó la copia local de esta pizarra y se enviará al servidor.');
-          }
-        } catch {
-          writeAllowed.current = false;
-          setCanWrite(false);
-          setAccessNotice(
-            'No se pudo recuperar la copia local. Se conserva intacta; libera espacio o revisa el almacenamiento antes de editar.',
-          );
-        }
-      }
+      serverSynced = true;
+      restoreDrafts();
       accesoRechazado = false;
       setStatus('conectado');
+      saveSnapshot();
     });
     provider.on('disconnect', () =>
       setStatus((previo) => (previo === 'rechazado' ? previo : 'desconectado')),
@@ -197,6 +262,9 @@ export function useBoardDocument(
       if (disposed) return;
       writeAllowed.current = false;
       setCanWrite(false);
+      serverSynced = false;
+      setOfflineReady(false);
+      if (boardId !== null) forgetBoard(me.id, boardId);
       provider.disconnect();
       if (reason === 'token-invalido' && !renovandoToken) {
         renovandoToken = true;
@@ -284,7 +352,10 @@ export function useBoardDocument(
 
     if (!navigator.onLine) provider.disconnect();
 
-    const alActualizar = (): void => setState(readBoardState(doc));
+    const alActualizar = (): void => {
+      setState(readBoardState(doc));
+      saveSnapshot();
+    };
     doc.on('update', alActualizar);
     alActualizar();
     leerPresencia();
@@ -300,7 +371,7 @@ export function useBoardDocument(
       providerRef.current = null;
       draftsRef.current = null;
     };
-  }, [doc, room, me]);
+  }, [doc, room, me, offline, board, boardId]);
 
   // La validacion se recalcula solo cuando cambia el modelo. El layout cambia en
   // cada arrastre y no afecta a la validez.
@@ -391,6 +462,7 @@ export function useBoardDocument(
       accessNotice,
       participants,
       canWrite,
+      offlineReady,
       dispatch,
       announceEditing,
     }),
@@ -402,6 +474,7 @@ export function useBoardDocument(
       accessNotice,
       participants,
       canWrite,
+      offlineReady,
       dispatch,
       announceEditing,
     ],
