@@ -173,7 +173,12 @@ function BoardLoader(props: BoardSelectionProps): React.JSX.Element {
         </div>
       </main>
     );
-  return <BoardSession key={String(offline)} {...props} board={board} offline={offline} />;
+  // Sin `key`: cambiar de modo no remonta el editor. La réplica limpia de Yjs
+  // la crea `useBoardDocument`, que es quien sabe cuándo hace falta; remontar
+  // desde aquí tiraba además la conversación del asistente y el candidato de
+  // importación en curso, que es trabajo que puede haber costado una llamada
+  // de IA y que el usuario no ha pedido descartar.
+  return <BoardSession {...props} board={board} offline={offline} />;
 }
 
 function BoardSession({
@@ -365,9 +370,10 @@ function BoardSession({
   // es estado local de interfaz: se limpia en cuanto el documento confirma que
   // la clase o relacion ya no existe.
   useEffect(() => {
+    // Una réplica recién creada está vacía y todavía no confirma nada: al
+    // cambiar entre servidor y copia local no puede borrar la selección.
     if (
       selectedId === null ||
-      board === null ||
       (documento.state.semantic.classes.length === 0 && documento.status === 'conectando')
     )
       return;
@@ -380,7 +386,6 @@ function BoardSession({
     documento.state.semantic.classes,
     documento.state.semantic.relationships,
     documento.status,
-    board,
     selectedId,
     setSelectedId,
   ]);
@@ -535,7 +540,7 @@ function BoardSession({
         <p className="advertencia banda" role="status" data-testid="modo-offline">
           Estás trabajando con una copia local. Al volver la conexión se comprobarán tus permisos y
           se sincronizarán los cambios. El asistente y la generación requieren conexión.{' '}
-          <Link to="/proyectos">Ver pizarras guardadas</Link>
+          <Link to="/sin-conexion">Ver pizarras guardadas</Link>
         </p>
       )}
       {rechazo !== null && (

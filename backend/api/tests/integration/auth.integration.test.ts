@@ -113,12 +113,50 @@ describe('sesion', () => {
     const segunda = renovacion.cookies.find((item) => item.name === 'uml_refresh');
     expect(`uml_refresh=${segunda?.value}`).not.toBe(cookieInicial);
 
-    // Reutilizar el token ya rotado no funciona.
+    // En cuanto el sucesor se usa, el cliente legitimo si recibio su respuesta y
+    // volver a presentar el token viejo es una reutilizacion.
+    const tercera = await api.request('POST', '/auth/refresh', {
+      cookie: `uml_refresh=${segunda?.value}`,
+    });
+    expect(tercera.status).toBe(200);
+
     const reutilizacion = await api.request('POST', '/auth/refresh', { cookie: cookieInicial });
     expect(reutilizacion.status).toBe(401);
   });
 
-  it('un token de refresco solo puede consumirse una vez aunque lleguen dos peticiones juntas', async () => {
+  it('una renovacion cuya respuesta no llego al navegador puede repetirse', async () => {
+    const sesion = await api.signUp('renovacion-perdida@example.com');
+
+    // El servidor rota y responde; recargar en ese instante descarta la
+    // respuesta y el navegador se queda con el token que acaba de revocarse.
+    const perdida = await api.request('POST', '/auth/refresh', { cookie: sesion.cookie });
+    expect(perdida.status).toBe(200);
+
+    const reintento = await api.request('POST', '/auth/refresh', { cookie: sesion.cookie });
+    expect(reintento.status).toBe(200);
+
+    const entregada = reintento.cookies.find((item) => item.name === 'uml_refresh');
+    expect(entregada?.value).toBeDefined();
+    const perfil = await api.request('GET', '/auth/me', { token: reintento.body.accessToken });
+    expect(perfil.status).toBe(200);
+  });
+
+  it('pasado el margen, un token rotado ya no se acepta', async () => {
+    const sesion = await api.signUp('margen-vencido@example.com');
+    const renovacion = await api.request('POST', '/auth/refresh', { cookie: sesion.cookie });
+    expect(renovacion.status).toBe(200);
+
+    // Se envejece la revocacion en lugar de esperar medio minuto real.
+    await api.app.prisma.refreshToken.updateMany({
+      where: { userId: sesion.userId, revokedAt: { not: null } },
+      data: { revokedAt: new Date(Date.now() - 60_000) },
+    });
+
+    const tardia = await api.request('POST', '/auth/refresh', { cookie: sesion.cookie });
+    expect(tardia.status).toBe(401);
+  });
+
+  it('dos peticiones juntas no dejan dos sesiones independientes', async () => {
     const sesion = await api.signUp('carrera-refresh@example.com');
 
     const respuestas = await Promise.all([
@@ -126,7 +164,19 @@ describe('sesion', () => {
       api.request('POST', '/auth/refresh', { cookie: sesion.cookie }),
     ]);
 
-    expect(respuestas.map(({ status }) => status).sort()).toEqual([200, 401]);
+    // Una de las dos puede atenderse por el margen de rotacion —consumiendo el
+    // sucesor que la otra no llego a entregar—, asi que ya no se exige un 401.
+    // Lo que no cambia: la cadena avanza y el token original queda fuera.
+    expect(respuestas.every(({ status }) => [200, 401].includes(status))).toBe(true);
+    const ultima = respuestas.findLast(({ status }) => status === 200);
+    const entregada = ultima?.cookies.find((item) => item.name === 'uml_refresh');
+    expect(
+      (await api.request('POST', '/auth/refresh', { cookie: `uml_refresh=${entregada?.value}` }))
+        .status,
+    ).toBe(200);
+
+    const reutilizacion = await api.request('POST', '/auth/refresh', { cookie: sesion.cookie });
+    expect(reutilizacion.status).toBe(401);
   });
 
   it('cerrar sesion revoca el token de refresco', async () => {

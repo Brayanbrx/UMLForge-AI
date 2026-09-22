@@ -1,5 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
-import { nuevoCorreo } from '../support/actors.js';
+import { activarCuentaEIniciarSesion, nuevoCorreo } from '../support/actors.js';
 
 const pantallas = [
   { width: 320, height: 568 },
@@ -21,10 +21,12 @@ for (const viewport of pantallas) {
       await expect(page.getByTestId('email')).toBeVisible();
       await comprobarAncho(page, testInfo, 'acceso', viewport.width);
       await page.getByRole('button', { name: 'Crear cuenta', exact: true }).tap();
-      await page.getByTestId('email').fill(nuevoCorreo('movil'));
+      const email = nuevoCorreo('movil');
+      await page.getByTestId('email').fill(email);
       await page.getByTestId('displayName').fill('Usuario de prueba en móvil');
       await page.getByTestId('password').fill('contrasena-de-prueba');
       await page.getByTestId('enviar').tap();
+      await activarCuentaEIniciarSesion(page, email);
       await expect(page.getByTestId('lista-proyectos')).toBeVisible();
       await comprobarAncho(page, testInfo, 'proyectos', viewport.width);
 

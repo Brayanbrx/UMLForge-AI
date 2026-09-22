@@ -5,7 +5,7 @@ import {
   type SemanticModel,
   type ValidationIssue,
 } from '@uml/contracts';
-import { useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { planBatch, validateModel } from '@uml/domain-core';
 import { CandidateEditor, etiquetaComando } from './CandidateEditor.js';
 import { removeCandidateCommand } from './candidate.js';
@@ -82,6 +82,24 @@ export function ImportPanel({
   const [formatoExport, setFormatoExport] = useState<'EA_21' | 'UML_251'>('EA_21');
   const imagenRef = useRef<HTMLInputElement>(null);
   const xmiRef = useRef<HTMLInputElement>(null);
+  const exportRef = useRef<HTMLFormElement>(null);
+  const candidateRef = useRef<HTMLDivElement>(null);
+  const exportOpen = nombreExport !== null;
+  const candidateOpen = candidato !== null;
+
+  // Los formularios se insertan debajo de los controles de importación. Al
+  // abrirlos, desplaza el panel hasta el trabajo nuevo, sin moverlo al escribir.
+  //
+  // El desplazamiento se repite en el siguiente cuadro: al insertar el
+  // formulario, el panel todavía no conoce su alto final —`:has(.candidato)` le
+  // cambia el reparto de la columna— y el primer intento no tiene nada que
+  // desplazar. Sin la segunda pasada, el panel se queda arriba y lo nuevo
+  // aparece fuera de la vista.
+  useAparecerALaVista(exportOpen, exportRef, 'end');
+  // Y hasta las filas editables, no hasta la cabecera del candidato: alinear su
+  // principio dejaba justo el editor debajo de la barra fija de «Aplicar», que
+  // se pega al pie del panel. Se veía el botón y no lo que hay que corregir.
+  useAparecerALaVista(candidateOpen, candidateRef, 'start', '.editor-candidato');
   const preview = useMemo(() => {
     if (candidato === null || !('batch' in candidato)) return null;
     const plan = planBatch(state, candidato.batch);
@@ -300,6 +318,7 @@ export function ImportPanel({
 
       {nombreExport !== null && (
         <form
+          ref={exportRef}
           className="nombre-export"
           data-testid="nombre-export"
           onSubmit={(evento) => {
@@ -365,7 +384,7 @@ export function ImportPanel({
       )}
 
       {candidato !== null && (
-        <div className="candidato" data-testid="candidato">
+        <div ref={candidateRef} className="candidato" data-testid="candidato">
           <div className="candidato-cabecera">
             <strong>Antes de aplicar</strong>
             {fuente !== null && <span title={fuente.name}>{fuente.name}</span>}
@@ -530,6 +549,32 @@ export function ImportPanel({
       )}
     </section>
   );
+}
+
+/**
+ * Trae a la vista lo que acaba de abrirse dentro del panel que se desplaza.
+ *
+ * `dentro` apunta a la parte que de verdad hay que ver cuando el bloque entero
+ * no cabe; si no existe, se usa el bloque.
+ */
+function useAparecerALaVista<T extends HTMLElement>(
+  abierto: boolean,
+  bloque: React.RefObject<T | null>,
+  block: ScrollLogicalPosition,
+  dentro?: string,
+): void {
+  useLayoutEffect(() => {
+    if (!abierto) return;
+    const mostrar = (): void => {
+      const raiz = bloque.current;
+      if (raiz === null) return;
+      const destino = dentro === undefined ? raiz : (raiz.querySelector(dentro) ?? raiz);
+      destino.scrollIntoView({ block });
+    };
+    mostrar();
+    const cuadro = requestAnimationFrame(mostrar);
+    return () => cancelAnimationFrame(cuadro);
+  }, [abierto, bloque, block, dentro]);
 }
 
 /** El servidor recibe la imagen en base64: no hay multipart en esta API. */

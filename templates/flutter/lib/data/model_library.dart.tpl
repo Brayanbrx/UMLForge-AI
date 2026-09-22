@@ -53,6 +53,17 @@ class ModelLibrary {
   String _textMode = 'local', _speechMode = 'local';
   final RemoteAiSettings remote = RemoteAiSettings.fromBuild();
   final Map<String, Map<String, String>> _settings = {};
+  bool get nativeTools =>
+      text?.runtime == ModelRuntime.litertlm &&
+      _settings[textId]?['nativeTools'] == 'verified' &&
+      _settings[textId]?['nativeToolsBackend'] == backend;
+  set nativeTools(bool value) {
+    if (textId != null) {
+      (_settings[textId!] ??= {})['nativeTools'] = value ? 'verified' : 'json';
+      _settings[textId!]!['nativeToolsBackend'] = backend;
+    }
+  }
+
   String get backend => _settings[textId]?['backend'] ?? 'cpu';
   set backend(String value) {
     if (!['cpu', 'gpu'].contains(value))
@@ -165,6 +176,9 @@ class ModelLibrary {
         final entry = stored[model.id];
         if (entry is! Map) continue;
         _settings[model.id] = {
+          if (entry['nativeTools'] == 'verified') 'nativeTools': 'verified',
+          if (['cpu', 'gpu'].contains(entry['nativeToolsBackend']))
+            'nativeToolsBackend': entry['nativeToolsBackend'],
           if (['cpu', 'gpu'].contains(entry['backend']))
             'backend': entry['backend'],
           if (templates.contains(entry['template']))

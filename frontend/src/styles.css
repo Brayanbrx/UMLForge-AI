@@ -3589,6 +3589,17 @@ button.toolbox-item.active {
 
   .barra-editor {
     gap: var(--e-2);
+    /* Entre el teléfono y el escritorio la barra seguia siendo una sola fila
+       sin ceder: con la pizarra guardada para abrir sin conexión, los avisos
+       de estado piden casi 400 px y en una tableta de 768 empujaban Salir
+       fuera de la pantalla —la página entera se ensanchaba a 858—. Aquí baja
+       a una segunda fila, que es lo que ya hace el telefono. */
+    flex-wrap: wrap;
+  }
+
+  .barra-editor .estado-barra {
+    flex-wrap: wrap;
+    min-width: 0;
   }
 
   .barra-editor button.boton-panel {

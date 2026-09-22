@@ -49,7 +49,11 @@ const server = new Server({
   async onRequest({ request, response }) {
     const url = new URL(request.url ?? '/', 'http://localhost:4187');
     const cookieId = /offline-test-session=([^;]+)/.exec(request.headers.cookie ?? '')?.[1];
-    const token = request.headers.authorization?.replace('Bearer ', '') ?? cookieId;
+    // Como en producción: la cookie solo renueva o cierra la sesión. Los datos
+    // requieren acceso Bearer para ejercitar también la renovación tras un 401.
+    const token = ['/api/auth/refresh', '/api/auth/logout'].includes(url.pathname)
+      ? cookieId
+      : request.headers.authorization?.replace('Bearer ', '');
     const user = Object.values(users).find((item) => item.id === token);
     const json = (value: unknown, status = 200): void => {
       response.writeHead(status, {
@@ -69,6 +73,14 @@ const server = new Server({
       json({ ok: true });
     } else if (url.pathname === '/test/expire') {
       sessions.delete(url.searchParams.get('id') ?? '');
+      json({ ok: true });
+    } else if (url.pathname === '/test/close') {
+      // Así cierra el proceso real cuando caduca el token de acceso: la sala se
+      // cierra con un motivo, sin tocar la sesión ni los permisos.
+      const reason = url.searchParams.get('reason') ?? 'token-invalido';
+      for (const document of server.hocuspocus.documents.values())
+        for (const connection of document.getConnections())
+          connection.close({ code: reason === 'token-invalido' ? 4401 : 4403, reason });
       json({ ok: true });
     } else if (url.pathname === '/api/auth/login') {
       let body = '';

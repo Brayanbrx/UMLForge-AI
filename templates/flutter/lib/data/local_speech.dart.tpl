@@ -37,12 +37,14 @@ class LocalSpeech {
   final LocalTranscriber transcribe;
   final RemoteTranscriber transcribeRemote;
   final Future<Directory> Function() temporaryDirectory;
+  final Duration transcriptionTimeout;
   LocalSpeech(
     this.library, {
     AudioRecorder? recorder,
     this.transcribe = transcribeWhisperFile,
     this.transcribeRemote = transcribeRemoteAudio,
     this.temporaryDirectory = getTemporaryDirectory,
+    this.transcriptionTimeout = const Duration(seconds: 120),
   }) : recorder = recorder ?? AudioRecorder();
   bool recording = false;
   bool _closed = false;
@@ -50,6 +52,7 @@ class LocalSpeech {
   Timer? _limit;
   Completer<void>? _starting;
   Completer<void>? _transcribing;
+  Completer<void>? _cancellation;
   int _generation = 0;
   int lastMilliseconds = 0;
   bool get capturing => recording || _starting != null;
@@ -113,6 +116,27 @@ class LocalSpeech {
   }
 
   Future<String> finish(ResourceSpec resource) async {
+    // Keep ownership of the file/native worker until it actually finishes.
+    // A UI timeout must not delete audio still in use or start a second model.
+    if (_transcribing != null) throw StateError('No hay dictado activo');
+    final cancellation = Completer<void>();
+    _cancellation = cancellation;
+    try {
+      return await Future.any<String>([
+        _finish(resource),
+        cancellation.future.then<String>(
+          (_) => throw StateError('Dictado cancelado'),
+        ),
+      ]).timeout(transcriptionTimeout);
+    } on TimeoutException {
+      _generation++;
+      throw StateError(
+        'Tiempo agotado al transcribir. Puedes escribir la instruccion. El motor se esta liberando en segundo plano.',
+      );
+    }
+  }
+
+  Future<String> _finish(ResourceSpec resource) async {
     _limit?.cancel();
     final path = _audio;
     final model = library.speechRemote ? null : library.speech;
@@ -175,6 +199,7 @@ class LocalSpeech {
       } finally {
         _audio = null;
         _transcribing = null;
+        _cancellation = null;
         active.complete();
       }
     }
@@ -182,6 +207,9 @@ class LocalSpeech {
 
   Future<void> cancel() async {
     _generation++;
+    final cancellation = _cancellation;
+    if (cancellation != null && !cancellation.isCompleted)
+      cancellation.complete();
     _limit?.cancel();
     await _starting?.future;
     await _transcribing?.future;

@@ -86,6 +86,11 @@ model RefreshToken {
   revokedAt DateTime?
   createdAt DateTime  @default(now())
 
+  /// El token que lo sustituyo al rotar. Permite distinguir una respuesta de
+  /// renovacion que no llego al navegador —su reemplazo sigue sin usarse— de la
+  /// reutilizacion de un token viejo, que si es motivo para cerrar la sesion.
+  replacedById String? @db.Uuid
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])

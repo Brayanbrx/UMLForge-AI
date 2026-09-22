@@ -30,8 +30,11 @@ test('la tarjeta de un proyecto ajeno tiene una altura normal', async ({ browser
     await beto.page.goto('/proyectos');
     await expect(beto.page.getByTestId('lista-proyectos')).toBeVisible();
 
+    // La insignia lleva el rol traducido desde `ROLE_LABEL`, no el valor del
+    // contrato: `toHaveText` compara el texto del nodo y no ve la mayúscula que
+    // aplica la hoja de estilo.
     const insignia = beto.page.locator('.insignia-rol').first();
-    await expect(insignia).toHaveText('EDITOR');
+    await expect(insignia).toHaveText('Editor');
 
     // Una insignia es una línea de texto. Cualquier cosa por encima de esto
     // significa que ha vuelto a heredar el alto de otra clase.

@@ -1,6 +1,7 @@
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchMe,
+  currentAccessToken,
   isConnectionUnavailable,
   login as loginRequest,
   logout as logoutRequest,
@@ -23,6 +24,8 @@ interface SessionValue {
   readonly user: SessionUser | null;
   readonly loading: boolean;
   readonly offline: boolean;
+  /** Activa la copia local cuando una renovación falla por conectividad. */
+  activateOfflineCopy(): void;
   login(email: string, password: string): Promise<void>;
   register(email: string, displayName: string, password: string): Promise<RegistrationResponse>;
   logout(): Promise<void>;
@@ -38,6 +41,9 @@ interface SessionValue {
 
 const SessionContext = createContext<SessionValue | null>(null);
 
+/** Margen para que un cambio de red no cuente como quedarse sin conexion. */
+const CONFIRMAR_SIN_RED = 2000;
+
 export function SessionProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,6 +53,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }): Re
   currentUser.current = user;
   const isOffline = useRef(offline);
   isOffline.current = offline;
+  const activateOfflineCopy = useCallback(() => setOffline(true), []);
 
   // Al arrancar se intenta renovar: el token de acceso vive en memoria y no
   // sobrevive a una recarga, pero la cookie de refresco si.
@@ -69,7 +76,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }): Re
           await logoutRequest();
           if (!active() || logoutPending()) return;
         }
-        const renovado = await refreshSession();
+        // Al volver la red puede seguir vigente el acceso en memoria. Consultar
+        // el perfil lo verifica y renueva solo ante 401. Rotar siempre aquí
+        // consumía la cookie si el usuario recargaba antes de recibir la nueva.
+        const renovado = currentAccessToken() !== null || (await refreshSession());
         if (!active()) return;
         if (!renovado) {
           if (sessionRefreshUnavailable()) {
@@ -105,11 +115,24 @@ export function SessionProvider({ children }: { children: React.ReactNode }): Re
       }
     };
     void restore();
+    let confirmacion: number | undefined;
+    const cancelarConfirmacion = (): void => {
+      if (confirmacion === undefined) return;
+      window.clearTimeout(confirmacion);
+      confirmacion = undefined;
+    };
     const reconnect = (): void => {
+      cancelarConfirmacion();
       void restore();
     };
+    // Evita cambiar de réplica por un parpadeo. Las otras páginas permanecen
+    // montadas aunque la desconexión dure más que este margen.
     const disconnect = (): void => {
-      if (vigente) setOffline(true);
+      if (!vigente || isOffline.current || confirmacion !== undefined) return;
+      confirmacion = window.setTimeout(() => {
+        confirmacion = undefined;
+        if (vigente && !navigator.onLine) setOffline(true);
+      }, CONFIRMAR_SIN_RED);
     };
     const retry = (): void => {
       if (isOffline.current && navigator.onLine) reconnect();
@@ -133,6 +156,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }): Re
 
     return () => {
       vigente = false;
+      cancelarConfirmacion();
       window.removeEventListener('online', reconnect);
       window.removeEventListener('offline', disconnect);
       window.removeEventListener('storage', changedAccount);
@@ -146,6 +170,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }): Re
       user,
       loading,
       offline,
+      activateOfflineCopy,
       login: async (email, password) => {
         revision.current += 1;
         const perfil = await loginRequest(email, password);
@@ -166,7 +191,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }): Re
         setUser(perfil);
       },
     }),
-    [user, loading, offline],
+    [user, loading, offline, activateOfflineCopy],
   );
 
   return <SessionContext value={value}>{children}</SessionContext>;

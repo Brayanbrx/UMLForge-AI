@@ -15,19 +15,19 @@ class LocalModelSettings extends StatelessWidget {
     required this.run,
   });
 
-  Future<void> importModel(ModelRuntime runtime) async {
-    final extension = switch (runtime) {
-      ModelRuntime.litertlm => 'litertlm',
-      ModelRuntime.gguf => 'gguf',
-      ModelRuntime.whisper => 'bin',
-    };
+  Future<void> importModel(bool speech) async {
     final selection = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: [extension],
+      allowedExtensions: speech ? ['bin'] : ['litertlm', 'gguf'],
       withData: false,
     );
     final file = selection?.files.single;
     if (file?.path == null) return;
+    final runtime = speech
+        ? ModelRuntime.whisper
+        : file!.name.toLowerCase().endsWith('.litertlm')
+        ? ModelRuntime.litertlm
+        : ModelRuntime.gguf;
     final model = await library.importFile(
       File(file!.path!),
       file.name,
@@ -38,28 +38,26 @@ class LocalModelSettings extends StatelessWidget {
 
   Widget modeSelector(bool speech) => DropdownButtonFormField<String>(
     key: ValueKey(
-      'mode-${speech ? 'speech' : 'text'}-${speech ? library.speechMode : library.textMode}',
+      'mode-$speech-${speech ? library.speechMode : library.textMode}',
     ),
     initialValue: speech ? library.speechMode : library.textMode,
     isExpanded: true,
+    itemHeight: null,
     decoration: InputDecoration(
-      labelText: speech ? 'Origen de la voz' : 'Origen del texto',
+      labelText: speech ? 'Origen de voz' : 'Origen de texto',
     ),
-    items: [
+    items: const [
       DropdownMenuItem(
         value: 'local',
         child: Text(
-          speech
-              ? 'Whisper local (modelo importado, sin internet)'
-              : 'Modelo local importado (sin internet)',
+          'En el dispositivo',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ),
       DropdownMenuItem(
         value: 'remote',
-        child: Text(
-          'IA en linea (${speech ? library.remote.speechLabel : library.remote.textLabel})',
-          overflow: TextOverflow.ellipsis,
-        ),
+        child: Text('En linea', maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     ],
     onChanged: disabled
@@ -75,71 +73,146 @@ class LocalModelSettings extends StatelessWidget {
           }),
   );
 
-  Widget selector(BuildContext context, bool speech) {
+  Future<void> removeModel(
+    BuildContext context,
+    LocalModelFile selected,
+  ) async {
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        scrollable: true,
+        title: const Text('Quitar modelo'),
+        content: Text(
+          'Se quitara la copia de ${selected.name} de esta app. El archivo original se conserva.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Quitar'),
+          ),
+        ],
+      ),
+    );
+    if (yes == true) await library.remove(selected);
+  }
+
+  Widget modelCard(BuildContext context, bool speech) {
+    final selected = speech ? library.speech : library.text;
+    final remote = speech ? library.speechRemote : library.textRemote;
     final models = library.models
         .where((m) => (m.runtime == ModelRuntime.whisper) == speech)
         .toList();
-    final selected = speech ? library.speech : library.text;
-    return Row(
-      children: [
-        Expanded(
-          child: DropdownButtonFormField<String>(
-            key: ValueKey('${speech}_${selected?.id}_${models.length}'),
-            initialValue: selected?.id,
-            isExpanded: true,
-            decoration: InputDecoration(
-              labelText: speech ? 'Modelo de voz' : 'Modelo de texto',
-            ),
-            items: models
-                .map(
-                  (m) => DropdownMenuItem(
-                    value: m.id,
-                    child: Text(
-                      '${m.name} · ${(m.bytes / 1048576).toStringAsFixed(0)} MB',
-                      overflow: TextOverflow.ellipsis,
-                    ),
+    return Card.outlined(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  speech ? Icons.mic_none : Icons.chat_bubble_outline,
+                  size: 20,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    speech ? 'Voz' : 'Texto',
+                    style: Theme.of(context).textTheme.titleSmall,
                   ),
+                ),
+                if (!remote && selected != null)
+                  IconButton(
+                    tooltip: speech
+                        ? 'Quitar modelo de voz'
+                        : 'Quitar modelo de texto',
+                    onPressed: disabled
+                        ? null
+                        : () => run(() => removeModel(context, selected)),
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (remote)
+              Text(
+                (speech ? library.remote.speechReady : library.remote.textReady)
+                    ? 'En linea · ${speech ? library.remote.speechLabel : library.remote.textLabel}'
+                    : 'Configura el proveedor en Opciones.',
+                style: Theme.of(context).textTheme.bodySmall,
+              )
+            else ...[
+              if (models.isNotEmpty)
+                DropdownButtonFormField<String>(
+                  key: ValueKey(
+                    'model-$speech-${selected?.id}-${models.length}',
+                  ),
+                  initialValue: selected?.id,
+                  isExpanded: true,
+                  itemHeight: null,
+                  decoration: InputDecoration(
+                    labelText: speech ? 'Modelo de voz' : 'Modelo de texto',
+                  ),
+                  items: models
+                      .map(
+                        (m) => DropdownMenuItem(
+                          value: m.id,
+                          child: Tooltip(
+                            message: m.name,
+                            child: Text(
+                              m.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: disabled
+                      ? null
+                      : (id) => run(() async {
+                          if (id != null)
+                            await library.select(
+                              models.firstWhere((m) => m.id == id),
+                            );
+                        }),
                 )
-                .toList(),
-            onChanged: disabled
-                ? null
-                : (id) => run(() async {
-                    if (id != null)
-                      await library.select(
-                        models.firstWhere((m) => m.id == id),
-                      );
-                  }),
-          ),
+              else
+                Text(
+                  speech
+                      ? 'Dictado sin internet · opcional'
+                      : 'Respuestas sin internet',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: disabled
+                    ? null
+                    : () => run(() => importModel(speech)),
+                icon: const Icon(Icons.file_open_outlined, size: 20),
+                label: Text(
+                  selected == null ? 'Cargar modelo' : 'Cambiar archivo',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              if (selected == null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    speech ? 'Whisper .bin multilingue' : '.litertlm o .gguf',
+                    style: Theme.of(context).textTheme.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+            ],
+          ],
         ),
-        IconButton(
-          tooltip: 'Quitar modelo seleccionado del almacenamiento de la app',
-          onPressed: disabled || selected == null
-              ? null
-              : () => run(() async {
-                  final yes = await showDialog<bool>(
-                    context: context,
-                    builder: (c) => AlertDialog(
-                      title: const Text('Quitar modelo'),
-                      content: Text(
-                        'Se quitara la copia de ${selected.name} de esta app. El archivo original se conserva.',
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(c, false),
-                          child: const Text('Cancelar'),
-                        ),
-                        FilledButton(
-                          onPressed: () => Navigator.pop(c, true),
-                          child: const Text('Quitar'),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (yes == true) await library.remove(selected);
-                }),
-          icon: const Icon(Icons.delete_outline),
-        ),
-      ],
+      ),
     );
   }
 
@@ -147,107 +220,101 @@ class LocalModelSettings extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      modeSelector(false),
+      modelCard(context, false),
       const SizedBox(height: 12),
-      modeSelector(true),
-      const SizedBox(height: 12),
-      if (library.textRemote || library.speechRemote) ...[
-        RemoteAiForm(library: library, disabled: disabled, run: run),
-        const SizedBox(height: 12),
-      ],
-      if (!library.textRemote || !library.speechRemote) ...[
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final runtime in ModelRuntime.values)
-              if ((runtime == ModelRuntime.whisper)
-                  ? !library.speechRemote
-                  : !library.textRemote)
-                OutlinedButton.icon(
-                  onPressed: disabled
-                      ? null
-                      : () => run(() => importModel(runtime)),
-                  icon: const Icon(Icons.file_open_outlined),
-                  label: Text(switch (runtime) {
-                    ModelRuntime.litertlm => 'Importar LiteRT-LM',
-                    ModelRuntime.gguf => 'Importar GGUF',
-                    ModelRuntime.whisper => 'Importar Whisper',
-                  }),
-                ),
-          ],
-        ),
-        const SizedBox(height: 12),
-      ],
-      if (!library.textRemote) ...[
-        selector(context, false),
-        const SizedBox(height: 12),
-        if (library.text?.runtime == ModelRuntime.litertlm)
-          DropdownButtonFormField<String>(
-            key: ValueKey('backend-${library.textId}'),
-            initialValue: library.backend,
-            decoration: const InputDecoration(
-              labelText: 'Procesamiento LiteRT-LM',
-            ),
-            items: const [
-              DropdownMenuItem(value: 'cpu', child: Text('CPU')),
-              DropdownMenuItem(
-                value: 'gpu',
-                child: Text('GPU (si el dispositivo y modelo la soportan)'),
-              ),
-            ],
-            isExpanded: true,
-            onChanged: disabled
-                ? null
-                : (v) => run(() async {
-                    if (v != null) library.backend = v;
-                    await library.save();
-                  }),
-          ),
-        if (library.text?.runtime == ModelRuntime.gguf)
-          DropdownButtonFormField<String>(
-            key: ValueKey('template-${library.textId}'),
-            initialValue: library.template,
-            decoration: const InputDecoration(
-              labelText: 'Plantilla de conversacion GGUF',
-            ),
-            items: ModelLibrary.templates
-                .map((v) => DropdownMenuItem(value: v, child: Text(v)))
-                .toList(),
-            onChanged: disabled
-                ? null
-                : (v) => run(() async {
-                    if (v != null) library.template = v;
-                    await library.save();
-                  }),
-          ),
-        const SizedBox(height: 12),
-      ],
-      if (!library.speechRemote) ...[
-        selector(context, true),
-        const SizedBox(height: 12),
-      ],
-      DropdownButtonFormField<String>(
-        key: ValueKey('language-${library.speechId}'),
-        initialValue: library.language,
-        decoration: const InputDecoration(labelText: 'Idioma del dictado'),
-        items: const [
-          DropdownMenuItem(value: 'es', child: Text('Español')),
-          DropdownMenuItem(value: 'auto', child: Text('Detectar idioma')),
-        ],
-        onChanged: disabled
-            ? null
-            : (v) => run(() async {
-                if (v != null) library.language = v;
-                await library.save();
-              }),
-      ),
+      modelCard(context, true),
       const SizedBox(height: 8),
-      Text(
-        library.textRemote || library.speechRemote
-            ? 'IA en linea: la instruccion o el audio viajan al proveedor elegido con tu clave; la app sigue validando cada propuesta y pidiendo confirmacion. Sin internet usa los modelos locales.'
-            : 'Whisper: archivo GGML .bin multilingue de whisper.cpp; evita variantes .en para español. '
-                  'Texto: .litertlm o GGUF de instrucciones. Importar conserva una copia privada; la compatibilidad se comprueba al ejecutar.',
+      ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 16),
+        title: const Text('Opciones'),
+        children: [
+          modeSelector(false),
+          const SizedBox(height: 16),
+          modeSelector(true),
+          const SizedBox(height: 16),
+          if (library.textRemote || library.speechRemote) ...[
+            const Text(
+              'La instruccion o el audio se envian al proveedor elegido.',
+            ),
+            const SizedBox(height: 12),
+            RemoteAiForm(library: library, disabled: disabled, run: run),
+          ],
+          if (!library.textRemote &&
+              library.text?.runtime == ModelRuntime.litertlm)
+            DropdownButtonFormField<String>(
+              key: ValueKey('backend-${library.textId}'),
+              initialValue: library.backend,
+              isExpanded: true,
+              itemHeight: null,
+              decoration: const InputDecoration(labelText: 'Procesamiento'),
+              items: const [
+                DropdownMenuItem(value: 'cpu', child: Text('CPU')),
+                DropdownMenuItem(value: 'gpu', child: Text('GPU')),
+              ],
+              onChanged: disabled
+                  ? null
+                  : (v) => run(() async {
+                      if (v != null) library.backend = v;
+                      await library.save();
+                    }),
+            ),
+          if (!library.textRemote && library.text?.runtime == ModelRuntime.gguf)
+            DropdownButtonFormField<String>(
+              key: ValueKey('template-${library.textId}'),
+              initialValue: library.template,
+              isExpanded: true,
+              itemHeight: null,
+              decoration: const InputDecoration(labelText: 'Plantilla GGUF'),
+              items: ModelLibrary.templates
+                  .map(
+                    (v) => DropdownMenuItem(
+                      value: v,
+                      child: Text(
+                        v,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: disabled
+                  ? null
+                  : (v) => run(() async {
+                      if (v != null) library.template = v;
+                      await library.save();
+                    }),
+            ),
+          if (!library.speechRemote && library.speech != null) ...[
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              key: ValueKey('language-${library.speechId}'),
+              initialValue: library.language,
+              isExpanded: true,
+              itemHeight: null,
+              decoration: const InputDecoration(
+                labelText: 'Idioma del dictado',
+              ),
+              items: const [
+                DropdownMenuItem(value: 'es', child: Text('Español')),
+                DropdownMenuItem(
+                  value: 'auto',
+                  child: Text(
+                    'Automatico',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+              onChanged: disabled
+                  ? null
+                  : (v) => run(() async {
+                      if (v != null) library.language = v;
+                      await library.save();
+                    }),
+            ),
+          ],
+        ],
       ),
     ],
   );
@@ -304,13 +371,17 @@ class _RemoteAiFormState extends State<RemoteAiForm> {
     key: ValueKey('provider-${speech ? 'speech' : 'text'}-$value'),
     initialValue: value,
     isExpanded: true,
+    itemHeight: null,
     decoration: InputDecoration(
-      labelText: speech
-          ? 'Proveedor de voz (AI_SPEECH_PROVIDER)'
-          : 'Proveedor de texto (AI_LLM_PROVIDER)',
+      labelText: speech ? 'Proveedor de voz' : 'Proveedor de texto',
     ),
     items: providers
-        .map((p) => DropdownMenuItem(value: p.id, child: Text(p.id)))
+        .map(
+          (p) => DropdownMenuItem(
+            value: p.id,
+            child: Text(p.id, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        )
         .toList(),
     onChanged: widget.disabled
         ? null
@@ -331,9 +402,7 @@ class _RemoteAiFormState extends State<RemoteAiForm> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text('IA en linea', style: Theme.of(context).textTheme.titleMedium),
-            const Text(
-              'Mismos nombres que infra/.env del generador. Las claves se guardan en el almacenamiento seguro de este telefono.',
-            ),
+            const Text('Claves guardadas de forma segura en este dispositivo.'),
             if (library.textRemote) ...[
               const SizedBox(height: 12),
               providerField(
@@ -355,18 +424,14 @@ class _RemoteAiFormState extends State<RemoteAiForm> {
               TextField(
                 controller: textModel,
                 enabled: !widget.disabled,
-                decoration: const InputDecoration(
-                  labelText: 'Modelo de texto (AI_LLM_MODEL)',
-                ),
+                decoration: const InputDecoration(labelText: 'Modelo de texto'),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: textKey,
                 enabled: !widget.disabled,
                 obscureText: true,
-                decoration: InputDecoration(
-                  labelText: 'Clave (${textSpec.keyName})',
-                ),
+                decoration: InputDecoration(labelText: 'Clave API'),
               ),
             ],
             if (library.speechRemote) ...[
@@ -390,18 +455,14 @@ class _RemoteAiFormState extends State<RemoteAiForm> {
               TextField(
                 controller: speechModel,
                 enabled: !widget.disabled,
-                decoration: const InputDecoration(
-                  labelText: 'Modelo de voz (AI_SPEECH_MODEL)',
-                ),
+                decoration: const InputDecoration(labelText: 'Modelo de voz'),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: speechKey,
                 enabled: !widget.disabled,
                 obscureText: true,
-                decoration: InputDecoration(
-                  labelText: 'Clave (${speechSpec.keyName})',
-                ),
+                decoration: InputDecoration(labelText: 'Clave API'),
               ),
             ],
             const SizedBox(height: 12),
@@ -425,7 +486,7 @@ class _RemoteAiFormState extends State<RemoteAiForm> {
                       await library.save();
                     }),
               icon: const Icon(Icons.save_outlined),
-              label: const Text('Guardar IA en linea en este telefono'),
+              label: const Text('Guardar'),
             ),
           ],
         ),

@@ -193,4 +193,33 @@ void main() {
       expect(await File(recorder.path!).exists(), isFalse);
     },
   );
+  test(
+    'timeout devuelve control y conserva audio hasta terminar el motor',
+    () async {
+      final result = Completer<String>();
+      final entered = Completer<void>();
+      final recorder = FakeRecorder();
+      final speech = LocalSpeech(
+        library,
+        recorder: recorder,
+        temporaryDirectory: () async => directory,
+        transcriptionTimeout: const Duration(milliseconds: 50),
+        transcribe: (_, _) {
+          entered.complete();
+          return result.future;
+        },
+      );
+      await speech.start(() {});
+      final rejected = expectLater(speech.finish(resource), throwsStateError);
+      await entered.future;
+      await rejected;
+      expect(speech.transcribing, isTrue);
+      expect(await File(recorder.path!).exists(), isTrue);
+      await expectLater(speech.start(() {}), throwsStateError);
+      result.complete('texto tardio');
+      await speech.close();
+      expect(speech.transcribing, isFalse);
+      expect(await File(recorder.path!).exists(), isFalse);
+    },
+  );
 }

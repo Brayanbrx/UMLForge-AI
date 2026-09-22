@@ -71,7 +71,7 @@ El servidor necesita acceso saliente a DNS, registros de imágenes, certificados
 ## Verificación funcional antes de compartir el enlace
 
 1. Abrir el dominio con certificado válido; confirmar redirección HTTP a HTTPS.
-2. Registrar una cuenta real y verificar login y renovación de sesión.
+2. Registrar una cuenta real, **activarla desde el enlace del correo** —sin activar, el login responde 403— y verificar después login y renovación de sesión. Este paso comprueba de paso la entrega real de Brevo.
 3. Abrir la misma pizarra con dos usuarios y comprobar `En vivo`, cambios y reconexión.
 4. Importar/exportar XMI; probar una imagen con el proveedor de visión elegido.
 5. Generar y descargar un ZIP desde una pizarra válida.

@@ -77,9 +77,34 @@ export function cachedBoard(userId: string, boardId: string): OfflineBoard | nul
   return value as unknown as OfflineBoard;
 }
 
-/** Call only after saving a server-synchronized document and verifying its scope. */
+/**
+ * Call only after saving a server-synchronized document and verifying its scope.
+ *
+ * Unlike the profile helpers this one lets a storage failure through on purpose:
+ * the caller advertises the board as available offline, and it may only do so
+ * once the entry is really on disk.
+ */
 export function rememberBoard(userId: string, board: OfflineBoard): void {
   localStorage.setItem(boardKey(userId, board.id), JSON.stringify(board));
+}
+
+/**
+ * Keeps an authorized copy openable, without its former write permission.
+ *
+ * Losing write access does not invalidate the local document — it is still the
+ * server's — so the entry survives as read-only instead of being removed. Only a
+ * revoked board justifies `forgetBoard`.
+ */
+export function downgradeBoard(userId: string, boardId: string): void {
+  const board = cachedBoard(userId, boardId);
+  if (board === null || board.role === 'VIEWER') return;
+  try {
+    localStorage.setItem(boardKey(userId, boardId), JSON.stringify({ ...board, role: 'VIEWER' }));
+  } catch {
+    // Sin espacio para reescribirla, la entrada anterior no puede quedarse: su
+    // rol permitiria editar una copia que ya no se puede publicar.
+    forgetBoard(userId, boardId);
+  }
 }
 
 export function forgetBoard(userId: string, boardId: string): void {

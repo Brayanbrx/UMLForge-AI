@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router';
+import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router';
 import { lazy, Suspense, useLayoutEffect } from 'react';
 import { LoginPage } from './features/auth/LoginPage.js';
 import { ProfilePage } from './features/auth/ProfilePage.js';
@@ -72,24 +72,24 @@ function Rutas(): React.JSX.Element {
     );
   }
 
-  if (offline) {
-    return (
-      <Routes>
-        <Route path="/pizarras/:boardId" element={<BoardPage />} />
-        <Route path="*" element={<OfflineBoardsPage />} />
-      </Routes>
-    );
-  }
-
   return (
-    <Routes>
-      <Route path="/proyectos" element={<ProjectsPage />} />
-      <Route path="/cuenta" element={<ProfilePage />} />
-      <Route path="/activar" element={<VerificationPage />} />
-      <Route path="/restablecer" element={<ResetPage />} />
-      <Route path="/proyectos/:projectId" element={<ProjectPage />} />
-      <Route path="/pizarras/:boardId" element={<BoardPage />} />
-      <Route path="*" element={<Navigate to="/proyectos" replace />} />
-    </Routes>
+    <>
+      {offline && !pathname.startsWith('/pizarras/') && pathname !== '/sin-conexion' && (
+        <p className="advertencia banda" role="status" data-testid="aviso-sin-conexion">
+          Sin conexión. Conservamos lo que estás escribiendo; espera a reconectar para enviarlo.{' '}
+          <Link to="/sin-conexion">Ver pizarras guardadas</Link>
+        </p>
+      )}
+      <Routes>
+        <Route path="/proyectos" element={<ProjectsPage />} />
+        <Route path="/cuenta" element={<ProfilePage />} />
+        <Route path="/activar" element={<VerificationPage />} />
+        <Route path="/restablecer" element={<ResetPage />} />
+        <Route path="/proyectos/:projectId" element={<ProjectPage />} />
+        <Route path="/pizarras/:boardId" element={<BoardPage />} />
+        <Route path="/sin-conexion" element={<OfflineBoardsPage />} />
+        <Route path="*" element={<Navigate to="/proyectos" replace />} />
+      </Routes>
+    </>
   );
 }

@@ -18,7 +18,12 @@ export class BoardDrafts {
     this.snapshotKey = `uml_board_snapshot_v1:${encodeURIComponent(userId)}:${encodeURIComponent(room)}`;
   }
 
-  /** Last authorized server state, also saved for readers and untouched boards. */
+  /**
+   * Last authorized server state, also saved for readers and untouched boards.
+   *
+   * Throws when storage rejects the write: the caller shows the board as
+   * available offline and must not claim that before the copy exists.
+   */
   snapshot(doc: Y.Doc): void {
     this.storage.setItem(this.snapshotKey, encode(doc));
   }
@@ -30,9 +35,13 @@ export class BoardDrafts {
     const candidate = new Y.Doc();
     try {
       Y.applyUpdate(candidate, decode(value));
-      if (includeDrafts) this.restore(candidate);
+      const drafts = includeDrafts ? this.entries() : [];
+      for (const [, draft] of drafts) Y.applyUpdate(candidate, decode(draft));
       readBoardState(candidate);
       Y.applyUpdate(doc, Y.encodeStateAsUpdate(candidate));
+      // Abrir solo lee, incluso con borradores de varias pestañas. `restore`
+      // unifica las ranuras al reconectar; hacerlo aquí duplicaría la instantánea
+      // completa y consumiría cuota sin que el usuario haya editado nada.
       return true;
     } finally {
       candidate.destroy();

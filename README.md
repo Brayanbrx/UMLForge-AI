@@ -105,6 +105,23 @@ IA (`AI_LLM_PROVIDER`, `AI_VISION_PROVIDER` y `AI_SPEECH_PROVIDER`), como en CI.
 Con un proveedor real gastan tokens y las pruebas del asistente fallan por
 latencia: un proveedor tarda más que los quince segundos que espera la prueba.
 
+También esperan `MAIL_PROVIDER=log`, como en CI: cada actor registra una cuenta
+nueva y lee el enlace de activación del registro de la API. Con `brevo` el
+correo se envía de verdad —y a direcciones `@example.com` el proveedor lo
+rechaza—, así que la prueba nunca encuentra el enlace y **todas** las que
+registran una cuenta fallan al primer paso. Si el `infra/.env` de la máquina
+tiene proveedores reales, se recrea la API con los valores de prueba sin tocar
+el archivo (las variables del intérprete ganan a las del `.env`):
+
+```bash
+AI_LLM_PROVIDER=mock AI_VISION_PROVIDER=mock AI_SPEECH_PROVIDER=mock \
+MAIL_PROVIDER=log BREVO_API_KEY= \
+docker compose -f infra/compose.yml --env-file infra/.env up -d --no-build --force-recreate api
+```
+
+Al terminar, el mismo comando sin variables delante restaura los proveedores
+reales.
+
 Las pruebas de dos navegadores incluyen el paso de la defensa que va del diagrama
 al archivo: dibujar una clase, generar y **comprobar que el ZIP descargado
 contiene esa clase**. No basta con que baje un archivo — uno vacío también

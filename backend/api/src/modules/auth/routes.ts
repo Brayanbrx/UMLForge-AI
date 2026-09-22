@@ -57,8 +57,18 @@ export async function authRoutes(
         data: { sessionVersion: user.sessionVersion },
       });
       if (current.count !== 1) throw unauthorized('La sesión fue revocada.');
+      const emitido = await tx.refreshToken.create({
+        data: {
+          userId: user.id,
+          tokenHash: refresh.hash,
+          expiresAt: new Date(Date.now() + config.REFRESH_TOKEN_TTL_SECONDS * 1000),
+        },
+      });
       if (consumedRefreshId !== undefined) {
         const now = new Date();
+        // El enlace al sucesor se guarda con la revocacion, en la misma fila y
+        // la misma transaccion: si la emision falla, no queda un token revocado
+        // apuntando a otro que no existe.
         const consumed = await tx.refreshToken.updateMany({
           where: {
             id: consumedRefreshId,
@@ -66,17 +76,10 @@ export async function authRoutes(
             revokedAt: null,
             expiresAt: { gt: now },
           },
-          data: { revokedAt: now },
+          data: { revokedAt: now, replacedById: emitido.id },
         });
         if (consumed.count !== 1) throw unauthorized('La sesión expiró.');
       }
-      await tx.refreshToken.create({
-        data: {
-          userId: user.id,
-          tokenHash: refresh.hash,
-          expiresAt: new Date(Date.now() + config.REFRESH_TOKEN_TTL_SECONDS * 1000),
-        },
-      });
     });
 
     reply.setCookie(REFRESH_COOKIE, refresh.token, cookieOptions);
@@ -152,8 +155,43 @@ export async function authRoutes(
   });
 
   /**
+   * El sucesor de un token revocado, cuando su rotacion no llego a entregarse.
+   *
+   * Rotar en cada renovacion deja una ventana que la red puede partir por la
+   * mitad: la peticion llega, el servidor revoca el token y emite otro, y la
+   * respuesta se pierde —basta recargar en ese instante, que es justo lo que
+   * hace quien acaba de recuperar la conexion—. El navegador conserva entonces
+   * un token que el servidor ya no acepta y la sesion queda cerrada para
+   * siempre, sin que nadie haya hecho nada malo.
+   *
+   * Se distingue de una reutilizacion real por el sucesor: si sigue **sin
+   * usarse**, nadie recibio aquella respuesta. En cuanto el sucesor se usa, el
+   * cliente legitimo si la recibio y presentar el token viejo vuelve a ser lo
+   * que siempre fue —un replay— y se rechaza. Fuera del margen, tambien.
+   */
+  const MARGEN_ROTACION_MS = 30_000;
+
+  async function rotacionSinEntregar(revocado: {
+    revokedAt: Date | null;
+    replacedById: string | null;
+  }): Promise<{ id: string } | null> {
+    if (revocado.revokedAt === null || revocado.replacedById === null) return null;
+    if (Date.now() - revocado.revokedAt.getTime() > MARGEN_ROTACION_MS) return null;
+
+    const sucesor = await app.prisma.refreshToken.findUnique({
+      where: { id: revocado.replacedById },
+      select: { id: true, revokedAt: true, expiresAt: true },
+    });
+    if (sucesor === null || sucesor.revokedAt !== null || sucesor.expiresAt <= new Date()) {
+      return null;
+    }
+    return { id: sucesor.id };
+  }
+
+  /**
    * RF-A03. El token de refresco es rotativo: cada renovacion revoca el anterior
-   * y entrega uno nuevo. Si alguien reutiliza uno ya rotado, no funciona.
+   * y entrega uno nuevo. Reutilizar uno ya rotado no funciona, salvo el caso que
+   * describe `rotacionSinEntregar`: su sucesor sin estrenar y dentro del margen.
    */
   app.post('/auth/refresh', async (request, reply) => {
     const presented = request.cookies[REFRESH_COOKIE];
@@ -164,10 +202,18 @@ export async function authRoutes(
       include: { user: true },
     });
 
-    if (stored === null || stored.revokedAt !== null) {
+    if (stored === null) {
       // No se borra la cookie: otra pestana pudo rotar el token mientras esta
       // peticion estaba en vuelo, y un Set-Cookie tardio borraria el nuevo.
       throw unauthorized('La sesion expiro. Inicia sesion de nuevo.');
+    }
+
+    if (stored.revokedAt !== null) {
+      const sucesor = await rotacionSinEntregar(stored);
+      if (sucesor === null) throw unauthorized('La sesion expiro. Inicia sesion de nuevo.');
+      // Se consume el sucesor que nadie llego a recibir y se emite otro: la
+      // sesion sigue teniendo un unico token vivo.
+      return issueSession(reply, stored.user, sucesor.id);
     }
 
     if (stored.expiresAt <= new Date()) {

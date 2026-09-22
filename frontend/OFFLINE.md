@@ -9,7 +9,9 @@ El editor permite abrir y recargar pizarras visitadas previamente, continuar edi
 3. Puedes desconectarte, editar, recargar la página o cerrar y volver a abrir la pestaña en el mismo navegador. **Ver pizarras guardadas** permite navegar entre las copias de esa cuenta.
 4. Al reconectar se renueva la sesión, se consulta el acceso actual y después se recuperan los borradores sobre el documento del servidor. También se reintenta cada cinco segundos cuando el navegador indica conectividad, y al volver a enfocar la ventana.
 
-Si la sesión ya no es válida, inicia sesión con la misma cuenta para recuperar los pendientes. Si el permiso cambió a lector, se abre el documento del servidor sin enviar el borrador. Si se revocó el acceso a la pizarra, su entrada offline se retira. Los borradores se conservan para una recuperación posterior si se vuelve a autorizar la edición.
+Si la sesión ya no es válida, inicia sesión con la misma cuenta para recuperar los pendientes. Si el permiso cambió a lector, se abre el documento del servidor sin enviar el borrador y la entrada offline pasa a solo lectura. Solo la revocación del acceso a la pizarra retira su entrada; que caduque el token de acceso, que ocurre cada quince minutos con una pizarra abierta, no la toca. Los borradores se conservan para una recuperación posterior si se vuelve a autorizar la edición.
+
+Si la renovación del token falla por red o por un error temporal del servidor, el editor pasa a la copia local y reintenta sin exigir una recarga, incluso si el navegador sigue indicando conexión. El permiso de lectura se guarda al autenticar, antes de completar la sincronización.
 
 Si la sesión se recupera pero el servicio de pizarras sigue sin responder, la copia local continúa editable y se reintenta la consulta. Un error de permisos no activa este respaldo. El indicador de disponibilidad se retira si falla el guardado de la instantánea, y el contador de cambios por auditar usa la cuenta local incluso después de recargar sin red.
 
@@ -32,10 +34,14 @@ La identidad recordada contiene únicamente ID, correo y nombre. Los tokens de a
 
 Inicio de sesión, cierre y renovación comparten un bloqueo del navegador para evitar que una respuesta pendiente de otra pestaña sobrescriba la cookie de una sesión nueva.
 
-Las instantáneas permiten abrir también documentos vacíos o visitados solo como lector. Los borradores guardan los cambios antes de aplicarlos. Al reconectar se crea otra réplica de Yjs: no se conecta la réplica offline antes de verificar permisos; solo se mezclan borradores después de autenticación con escritura y sincronización inicial.
+Las instantáneas permiten abrir también documentos vacíos o visitados solo como lector. Se reescriben cuando la pizarra deja de recibir cambios durante un segundo, al ocultar la pestaña y al cerrarla, en lugar de en cada actualización del documento. Los borradores guardan los cambios antes de aplicarlos. Al reconectar se crea otra réplica de Yjs: no se conecta la réplica offline antes de verificar permisos; solo se mezclan borradores después de autenticación con escritura y sincronización inicial. El cambio de réplica no remonta el editor: la conversación del asistente y el candidato de importación en curso sobreviven a un corte de red.
+
+Quedarse sin conexión se confirma antes de pasar a la copia local: el evento del navegador también se dispara al cambiar de red. El editor marca «Sin conexión» de inmediato por su cuenta y sigue guardando cada cambio. Las otras páginas permanecen montadas incluso durante cortes prolongados y muestran un aviso; los formularios conservan lo escrito al reconectar. El enlace **Ver pizarras guardadas** abre el catálogo en `/sin-conexion` sin sustituir automáticamente la página actual.
+
+Abrir una copia local no escribe ni unifica las ranuras de borrador, aunque haya varias o no quede cuota. Cada editor conserva su ranura al reintentar la conexión; las ranuras se unifican al restaurarlas en una conexión autorizada.
 
 ## Verificación
 
-`npm run test:offline` compila la versión de producción y ejecuta Chromium contra un servidor Hocuspocus real y una API de prueba aislada, sin Docker ni PostgreSQL. Cubre recarga y reapertura sin red, cambios concurrentes, pizarras no visitadas, lectores, permisos retirados, cierre de sesión y recuperación de una sesión vencida. No sustituye `npm run test:e2e`, que verifica el backend completo con PostgreSQL.
+`npm run test:offline` compila la versión de producción y ejecuta Chromium contra un servidor Hocuspocus real y una API de prueba aislada, sin Docker ni PostgreSQL. Cubre recarga y reapertura sin red, cambios concurrentes, pizarras no visitadas, lectores, permisos retirados, cierre de sesión, recuperación de una sesión vencida, caducidad del token de acceso con renovación fallida y un parpadeo de red con trabajo abierto en los paneles. No sustituye `npm run test:e2e`, que verifica el backend completo con PostgreSQL.
 
 Las pruebas unitarias de `frontend/tests/board-drafts.test.ts`, `offline.test.ts` y `api.test.ts` cubren persistencia, separación de cuentas, corrupción, falta de almacenamiento y renovación de sesión.

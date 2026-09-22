@@ -7,9 +7,7 @@ import 'package:uuid/uuid.dart';
 /// sigue siendo una respuesta fuera del contrato.
 String stripCodeFence(String response) {
   final text = response.trim();
-  final match = RegExp(
-    r'^```[a-zA-Z]*\s*([\s\S]*?)\s*```$',
-  ).firstMatch(text);
+  final match = RegExp(r'^```[a-zA-Z]*\s*([\s\S]*?)\s*```$').firstMatch(text);
   return match == null ? text : match.group(1)!.trim();
 }
 
@@ -18,7 +16,11 @@ class Proposal {
   final dynamic id;
   final Map<String, dynamic>? data;
   Proposal(this.action, this.resource, this.id, this.data);
-  factory Proposal.parse(String response, AppSchema schema) {
+  factory Proposal.parse(
+    String response,
+    AppSchema schema, {
+    List<Map<String, dynamic>> records = const [],
+  }) {
     final dynamic value;
     try {
       value = jsonDecode(stripCodeFence(response));
@@ -38,11 +40,28 @@ class Proposal {
         value['resource'] is! String)
       throw FormatException('Accion o recurso invalido');
     final resource = schema.resource(value['resource']);
-    final data = value['data'] == null
+    var data = value['data'] == null
         ? null
         : Map<String, dynamic>.from(value['data']);
+    if (value['action'] == 'UPDATE' && data != null && value['id'] != null) {
+      final matches = records
+          .where((r) => r[resource.primaryKey] == value['id'])
+          .toList();
+      if (matches.length == 1) {
+        // Missing fields mean unchanged. Explicit null still clears an optional field.
+        // Never overwrite an explicit conflicting PK: validation must reject it.
+        data = {...matches.single, ...data};
+      }
+    }
     if (['CREATE', 'UPDATE'].contains(value['action'])) {
       if (data == null) throw FormatException('Faltan los datos del registro');
+      if (value['action'] == 'CREATE') {
+        for (final field in resource.fields.where(
+          (f) => f.nullable && !f.primaryKey,
+        )) {
+          data.putIfAbsent(field.name, () => null);
+        }
+      }
       if (value['action'] == 'CREATE' &&
           resource.key.javaType == 'UUID' &&
           data[resource.primaryKey] == null)

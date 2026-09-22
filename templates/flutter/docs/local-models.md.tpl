@@ -14,16 +14,18 @@ Importar no acredita compatibilidad: el runtime valida el modelo al ejecutar.
 ## Seleccion y uso
 
 1. Descarga los modelos que quieras probar y transfiere los archivos al telefono.
-2. En Asistente, pulsa Importar LiteRT-LM, Importar GGUF o Importar Whisper.
+2. En Asistente, abre Modelos y pulsa Cargar modelo en Texto o Voz.
+   Texto acepta `.litertlm` y `.gguf`; Voz acepta Whisper `.bin` multilingue.
 3. Elige el archivo en el selector Android. Importar otro conserva los anteriores.
 4. Selecciona Modelo de texto y Modelo de voz en sus listas. La eleccion persiste;
    cada archivo conserva sus preferencias de plantilla, CPU/GPU o idioma.
-5. LiteRT-LM: prueba CPU y GPU segun soporte del equipo. GGUF: elige la plantilla
+5. En Opciones puedes ajustar el procesamiento y el idioma.
+   LiteRT-LM: prueba CPU y GPU segun soporte del equipo. GGUF: elige la plantilla
    de conversacion indicada por el distribuidor. LiteRT-LM usa la plantilla del modelo.
 6. Whisper: Español (`es`) por defecto; tambien puedes elegir deteccion automatica.
-7. Dicta hasta 45 segundos, pulsa Parar y transcribir, corrige el texto y pulsa
-   Preparar propuesta. Tambien puedes escribir directamente sin modelo de voz.
-8. Revisa el JSON validado. Solo Confirmar escribe en SQLite; la cola envia el
+7. Dicta hasta 45 segundos, pulsa Terminar, corrige el texto y pulsa
+   Enviar. Tambien puedes escribir directamente sin modelo de voz.
+8. Responde las aclaraciones y revisa las diferencias. Solo Confirmar cambio escribe en SQLite; la cola envia el
    cambio cuando el backend vuelve a estar accesible.
 
 El icono de papelera quita la copia privada seleccionada tras confirmacion. No
@@ -47,14 +49,21 @@ Whisper transcribe, no decide que registro borrar ni genera operaciones CRUD.
 
 ## Instrucciones internas y memoria
 
-`lib/domain/assistant_prompt.dart` contiene el system prompt compartido por los
-dos motores de texto. Se agrega el recurso seleccionado, campos, restricciones y
-registros filtrados del contrato movil. La salida exige JSON con una accion
-CREATE/UPDATE/DELETE/LIST o una pregunta de aclaracion. No se registran herramientas
-ejecutables en LiteRT-LM; `automaticToolCalling` esta desactivado.
+`lib/domain/assistant_protocol.dart` contiene el protocolo del asistente con
+herramientas y `assistant_runner.dart` su ciclo de hasta 8 pasadas. Recibe catalogo,
+historial acotado, preguntas pendientes, fecha del dispositivo y resultados de
+consultas locales. Puede buscar, leer, calcular y preparar cambios. Las preguntas
+conservan el contexto para continuar con respuestas cortas.
 
-La validacion Dart rechaza campos desconocidos, tipos incorrectos, cambios de
-recurso y claves de edicion/borrado que no aparecen en los registros recibidos.
+LiteRT mantiene `automaticToolCalling: false`: la app valida y ejecuta cada
+herramienta. Probar herramientas nativas verifica una llamada y su respuesta con
+datos de prueba antes de activar el protocolo para ese modelo y CPU/GPU. GGUF y
+los modelos sin compatibilidad verificada usan solicitudes JSON con el mismo
+orquestador. `assistant_prompt.dart` y `LocalAgent.propose` conservan el modo
+sencillo de compatibilidad. Ver [evaluacion y limites](assistant-evaluation.md).
+
+La validacion Dart rechaza herramientas y campos desconocidos, tipos incorrectos,
+recursos fuera del contrato y claves de edicion/borrado que no se consultaron.
 El prompt no sustituye esa validacion. Las propuestas siguen requiriendo revision
 humana y el backend vuelve a validar durante sincronizacion.
 
@@ -63,15 +72,16 @@ acotado de la coleccion, no un system prompt de chat. El audio temporal se elimi
 al terminar/cancelar. Su texto nunca ejecuta acciones automaticamente; ruido o
 silencio pueden producir transcripciones equivocadas que hay que corregir.
 
-Los motores de voz y texto se usan secuencialmente. El LLM se carga y libera por
-solicitud; Whisper tampoco queda residente. Reduce RAM simultanea a costa del
-tiempo de carga. La pantalla muestra tiempos: el de texto incluye carga, inferencia
-y liberacion; el de voz empieza al finalizar la grabacion. No equivalen a un
-benchmark puro del modelo. La seleccion persiste sin mantener pesos en RAM.
+Los motores de voz y texto se usan secuencialmente. El LLM se conserva entre
+pasadas y mensajes hasta 60 segundos inactivo; se libera antes de Whisper y al
+cambiar modelo o cerrar la sesion. Whisper no queda residente. El tiempo mostrado
+incluye carga si fue necesaria y consultas; no es un benchmark puro de inferencia.
+La memoria de conversacion permanece durante la sesion de la app y se borra al
+cambiar cuenta/servidor/contrato o pulsar Nueva conversacion. No se guarda en disco.
 
 ## IA en linea con los proveedores de infra/.env
 
-Los selectores Origen del texto y Origen de la voz cambian entre el modelo
+En Modelos > Opciones, los selectores Origen de texto y Origen de voz cambian entre el modelo
 importado y la IA en linea. Los nombres de variable son los de `infra/.env`
 del generador (`AI_LLM_PROVIDER`, `AI_LLM_MODEL`, `AI_SPEECH_PROVIDER`,
 `AI_SPEECH_MODEL`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY`...),

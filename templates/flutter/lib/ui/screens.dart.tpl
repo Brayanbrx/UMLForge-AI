@@ -9,6 +9,7 @@ import '../domain/schema.dart';
 import 'app_model.dart';
 import 'custom_pages.dart';
 import 'local_model_settings.dart';
+import 'assistant_screen.dart';
 
 void showError(BuildContext context, Object error) => ScaffoldMessenger.of(
   context,
@@ -190,7 +191,7 @@ class _HomeState extends State<HomeScreen> with WidgetsBindingObserver {
           if (!m.isLocal)
             IconButton(
               tooltip: 'Sincronizar',
-              onPressed: m.busy ? null : () => m.sync(),
+              onPressed: m.busy || m.syncing ? null : () => m.sync(),
               icon: const Icon(Icons.sync),
             ),
         ],
@@ -221,6 +222,8 @@ class _HomeState extends State<HomeScreen> with WidgetsBindingObserver {
                   Icon(
                     m.isLocal
                         ? Icons.phone_android
+                        : !m.serverReachable
+                        ? Icons.cloud_off_outlined
                         : m.queue.isEmpty
                         ? Icons.cloud_done_outlined
                         : Icons.cloud_upload_outlined,
@@ -230,7 +233,7 @@ class _HomeState extends State<HomeScreen> with WidgetsBindingObserver {
                   Expanded(
                     child: Text(
                       m.isLocal
-                          ? 'Sin conexion · Guardado en este dispositivo'
+                          ? 'Modo local · Sin servidor configurado'
                           : '${m.queue.length} pendientes · ${m.message}',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -366,7 +369,10 @@ class _HomeState extends State<HomeScreen> with WidgetsBindingObserver {
                       ),
                     ],
                   ),
-                  AgentScreen(m, visible),
+                  AssistantScreen(
+                    m,
+                    simpleBuilder: () => AgentScreen(m, visible),
+                  ),
                   ListView(
                     padding: const EdgeInsets.all(16),
                     children: [
@@ -401,7 +407,7 @@ class _HomeState extends State<HomeScreen> with WidgetsBindingObserver {
                       const Divider(),
                       Text(
                         m.isLocal
-                            ? 'La cuenta local utiliza el modelo incluido en esta app. Sus registros permanecen en este dispositivo y no se envian al servidor.'
+                            ? 'Estas en modo local, aunque tengas internet. Para sincronizar: cierra sesion, activa Conectar a un servidor e ingresa su URL. Por USB usa http://127.0.0.1:8082 y ejecuta apk.bat usb en la PC. Los registros locales y del servidor se guardan por separado.'
                             : 'Para renovar el acceso remoto, vuelve a iniciar sesion con la misma cuenta. Los datos de otra cuenta o servidor se guardan por separado.',
                       ),
                       if (!m.isLocal)
@@ -607,13 +613,23 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
   LocalAgent? agent;
   LocalSpeech? speech;
   final text = TextEditingController();
-  String status = 'Abriendo biblioteca de modelos locales…';
+  String status = 'Cargando modelos…';
   bool busy = true;
+  Timer? progressTimer;
+  final operationTime = Stopwatch();
+  bool lastEngineBusy = false;
+  bool get engineBusy =>
+      (agent?.processing ?? false) || (speech?.transcribing ?? false);
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     unawaited(initialize());
+    progressTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && (busy || lastEngineBusy != engineBusy)) {
+        setState(() => lastEngineBusy = engineBusy);
+      }
+    });
   }
 
   @override
@@ -630,8 +646,7 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
       library = loaded;
       agent = LocalAgent(loaded);
       speech = LocalSpeech(loaded);
-      status =
-          'Elige el origen del texto y de la voz: modelo local importado o IA en linea. Puedes escribir sin voz.';
+      status = '';
     } catch (error) {
       status = 'No se pudo abrir la biblioteca: $error';
     } finally {
@@ -643,29 +658,39 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     text.dispose();
-    unawaited(speech?.close());
-    unawaited(agent?.close());
+    progressTimer?.cancel();
+    widget.model.assistantCleanup = () async {
+      try {
+        await agent?.close();
+      } finally {
+        await speech?.close();
+      }
+    }();
     super.dispose();
   }
 
   Future<void> run(Future<void> Function() action) async {
     if (busy) return;
+    operationTime
+      ..reset()
+      ..start();
     setState(() => busy = true);
     try {
       await action();
     } catch (e) {
       if (mounted) setState(() => status = e.toString());
     } finally {
+      operationTime.stop();
       if (mounted) setState(() => busy = false);
     }
   }
 
   Future<void> finishDictation() => run(() async {
+    setState(() => status = 'Transcribiendo…');
     final transcript = await speech!.finish(widget.model.selected);
     if (!mounted) return;
     text.text = transcript;
-    status =
-        '${speech!.engineLabel}: ${(speech!.lastMilliseconds / 1000).toStringAsFixed(1)} s. Revisa el texto antes de preparar la propuesta.';
+    status = 'Dictado listo. Revisa el texto.';
   });
 
   Future<void> cancelDictation() async {
@@ -678,177 +703,199 @@ class _AgentState extends State<AgentScreen> with WidgetsBindingObserver {
   }
 
   @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(20),
-    children: [
-      Text('Asistente', style: Theme.of(context).textTheme.headlineSmall),
-      const Text('Una accion a la vez. Revisa la propuesta antes de guardar.'),
-      const SizedBox(height: 16),
-      if (library != null)
-        LocalModelSettings(
-          library: library!,
-          disabled: busy || (speech?.recording ?? false),
-          run: run,
-        ),
-      const SizedBox(height: 16),
-      Text(status),
-      if (busy) const LinearProgressIndicator(),
-      const SizedBox(height: 16),
-      Text(
-        'Coleccion: ${widget.model.selected.className}. Registros filtrados: ${widget.rows.length}.',
-      ),
-      const SizedBox(height: 12),
-      TextField(
-        controller: text,
-        minLines: 3,
-        maxLines: 7,
-        decoration: const InputDecoration(labelText: 'Instruccion'),
-      ),
-      const SizedBox(height: 12),
-      Wrap(
-        spacing: 8,
+  Widget build(BuildContext context) => Center(
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 640),
+      child: ListView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: const EdgeInsets.all(16),
         children: [
-          OutlinedButton.icon(
-            onPressed: busy || !(library?.speechReady ?? false)
-                ? null
-                : () async {
-                    if (speech!.recording) {
-                      await finishDictation();
-                    } else {
-                      await run(() async {
-                        await speech!.start(() {
-                          if (mounted) unawaited(finishDictation());
-                        });
+          Text('Asistente', style: Theme.of(context).textTheme.headlineSmall),
+          const Text('Escribe o dicta lo que necesitas.'),
+          const SizedBox(height: 16),
+          if (library != null)
+            ExpansionTile(
+              key: const PageStorageKey('assistant-models'),
+              initiallyExpanded: !library!.textReady,
+              tilePadding: EdgeInsets.zero,
+              title: const Text('Modelos'),
+              subtitle: Text(
+                'Texto: ${library!.textReady ? "listo" : "sin configurar"} · Voz: ${library!.speechReady ? "lista" : "opcional"}',
+              ),
+              children: [
+                LocalModelSettings(
+                  library: library!,
+                  disabled: busy || engineBusy || (speech?.recording ?? false),
+                  run: run,
+                ),
+              ],
+            ),
+          const SizedBox(height: 16),
+          if (status.isNotEmpty) Text(status),
+          if (busy) const LinearProgressIndicator(),
+          if (busy && engineBusy) Text('${operationTime.elapsed.inSeconds} s'),
+          if (!busy && engineBusy) const Text('Liberando modelo…'),
+          if (busy && engineBusy)
+            TextButton(
+              onPressed: () {
+                setState(() => status = 'Cancelando…');
+                if (agent?.processing ?? false) unawaited(agent?.stop());
+                if (speech?.transcribing ?? false) unawaited(cancelDictation());
+              },
+              child: const Text('Cancelar solicitud'),
+            ),
+          const SizedBox(height: 16),
+          Text(
+            '${widget.model.selected.className} · ${widget.rows.length} registros',
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: text,
+            minLines: 3,
+            maxLines: 7,
+            decoration: const InputDecoration(
+              labelText: '¿Que quieres hacer?',
+              hintText: 'Describe una accion',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed:
+                    busy || engineBusy || !(library?.speechReady ?? false)
+                    ? null
+                    : () async {
+                        if (speech!.recording) {
+                          await finishDictation();
+                        } else {
+                          await run(() async {
+                            await speech!.start(() {
+                              if (mounted) unawaited(finishDictation());
+                            });
+                            if (mounted)
+                              setState(() => status = 'Grabando… Maximo 45 s.');
+                          });
+                        }
+                      },
+                icon: const Icon(Icons.mic_none),
+                label: Text(
+                  (speech?.recording ?? false) ? 'Terminar' : 'Dictar',
+                ),
+              ),
+              if (speech?.recording ?? false)
+                TextButton(
+                  onPressed: busy
+                      ? null
+                      : () => run(() async {
+                          await speech!.cancel();
+                          status = 'Dictado cancelado';
+                        }),
+                  child: const Text('Cancelar dictado'),
+                ),
+              FilledButton(
+                onPressed:
+                    busy ||
+                        engineBusy ||
+                        (speech?.recording ?? false) ||
+                        !(agent?.loaded ?? false)
+                    ? null
+                    : () => run(() async {
+                        setState(() => status = 'Preparando propuesta…');
+                        final resource = widget.model.selected;
+                        final rows = widget.rows
+                            .map((r) => Map<String, dynamic>.from(r))
+                            .toList();
+                        final proposal = await agent!.propose(
+                          text.text,
+                          widget.model.schema,
+                          resource,
+                          rows,
+                        );
+                        if (!context.mounted) return;
+                        setState(
+                          () => status =
+                              'Texto (${agent!.engineLabel}): ' +
+                              (agent!.lastMilliseconds / 1000).toStringAsFixed(
+                                1,
+                              ) +
+                              ' s.',
+                        );
+                        if (proposal.action == 'LIST') {
+                          await showDialog<void>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: Text(
+                                '${resource.className}: ${rows.length} registros locales',
+                              ),
+                              content: SingleChildScrollView(
+                                child: SelectableText(
+                                  const JsonEncoder.withIndent(
+                                    '  ',
+                                  ).convert(rows),
+                                ),
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context),
+                                  child: const Text('Cerrar'),
+                                ),
+                              ],
+                            ),
+                          );
+                          return;
+                        }
+                        final expected = proposal.action == 'CREATE'
+                            ? null
+                            : rows
+                                  .where(
+                                    (r) =>
+                                        r[resource.primaryKey].toString() ==
+                                        proposal.id.toString(),
+                                  )
+                                  .firstOrNull;
+                        if (proposal.action != 'CREATE' && expected == null)
+                          throw StateError(
+                            'Selecciona un registro presente en la lista local.',
+                          );
+                        if (!await confirm(
+                          context,
+                          'Revisar cambio',
+                          const JsonEncoder.withIndent(
+                            '  ',
+                          ).convert(proposal.toJson()),
+                        ))
+                          return;
+                        if (proposal.action == 'DELETE') {
+                          await widget.model.delete(
+                            resource,
+                            proposal.id,
+                            expected: expected,
+                          );
+                        } else {
+                          await widget.model.save(
+                            resource,
+                            proposal.data!,
+                            create: proposal.action == 'CREATE',
+                            expected: expected,
+                          );
+                        }
                         if (mounted)
                           setState(
-                            () => status =
-                                'Grabando localmente. Maximo 45 segundos.',
+                            () => status = 'Cambio guardado en el dispositivo.',
                           );
-                      });
-                    }
-                  },
-            icon: const Icon(Icons.mic_none),
-            label: Text(
-              (speech?.recording ?? false)
-                  ? 'Parar y transcribir'
-                  : 'Dictar',
-            ),
+                      }),
+                child: const Text('Revisar propuesta'),
+              ),
+            ],
           ),
-          if (speech?.recording ?? false)
-            TextButton(
-              onPressed: busy
-                  ? null
-                  : () => run(() async {
-                      await speech!.cancel();
-                      status = 'Dictado cancelado';
-                    }),
-              child: const Text('Cancelar dictado'),
-            ),
-          FilledButton(
-            onPressed:
-                busy ||
-                    (speech?.recording ?? false) ||
-                    !(agent?.loaded ?? false)
-                ? null
-                : () => run(() async {
-                    final resource = widget.model.selected;
-                    final rows = widget.rows
-                        .map((r) => Map<String, dynamic>.from(r))
-                        .toList();
-                    final proposal = await agent!.propose(
-                      text.text,
-                      widget.model.schema,
-                      resource,
-                      rows,
-                    );
-                    if (!context.mounted) return;
-                    setState(
-                      () => status =
-                          'Texto (${agent!.engineLabel}): ' +
-                          (agent!.lastMilliseconds / 1000).toStringAsFixed(1) +
-                          ' s.',
-                    );
-                    if (proposal.action == 'LIST') {
-                      await showDialog<void>(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: Text(
-                            '${resource.className}: ${rows.length} registros locales',
-                          ),
-                          content: SingleChildScrollView(
-                            child: SelectableText(
-                              const JsonEncoder.withIndent('  ').convert(rows),
-                            ),
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('Cerrar'),
-                            ),
-                          ],
-                        ),
-                      );
-                      return;
-                    }
-                    final expected = proposal.action == 'CREATE'
-                        ? null
-                        : rows
-                              .where(
-                                (r) =>
-                                    r[resource.primaryKey].toString() ==
-                                    proposal.id.toString(),
-                              )
-                              .firstOrNull;
-                    if (proposal.action != 'CREATE' && expected == null)
-                      throw StateError(
-                        'Selecciona un registro presente en la lista local.',
-                      );
-                    if (!await confirm(
-                      context,
-                      'Revisar cambio',
-                      const JsonEncoder.withIndent(
-                        '  ',
-                      ).convert(proposal.toJson()),
-                    ))
-                      return;
-                    if (proposal.action == 'DELETE') {
-                      await widget.model.delete(
-                        resource,
-                        proposal.id,
-                        expected: expected,
-                      );
-                    } else {
-                      await widget.model.save(
-                        resource,
-                        proposal.data!,
-                        create: proposal.action == 'CREATE',
-                        expected: expected,
-                      );
-                    }
-                    if (mounted)
-                      setState(
-                        () => status =
-                            'Cambio guardado localmente. Texto: ${(agent!.lastMilliseconds / 1000).toStringAsFixed(1)} s.',
-                      );
-                  }),
-            child: const Text('Preparar propuesta'),
-          ),
-          if (busy && (agent?.processing ?? false))
-            TextButton(
-              onPressed: () => agent?.stop(),
-              child: const Text('Detener IA'),
-            ),
-          if (busy && (speech?.transcribing ?? false))
-            TextButton(
-              onPressed: cancelDictation,
-              child: const Text('Descartar transcripcion'),
-            ),
+          const SizedBox(height: 16),
+          const Text('Tu confirmas cada cambio antes de guardarlo.'),
         ],
       ),
-      const SizedBox(height: 16),
-      const Text(
-        'Con modelos locales, voz y texto se procesan en el dispositivo sin llamar a ninguna API. Con IA en linea, la instruccion o el audio viajan al proveedor que configuraste con tu clave. En ambos casos la transcripcion no ejecuta cambios y cada propuesta se revisa y confirma antes de guardarse en el dispositivo.',
-      ),
-    ],
+    ),
   );
 }

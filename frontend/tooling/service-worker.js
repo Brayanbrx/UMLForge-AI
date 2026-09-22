@@ -27,7 +27,7 @@ self.addEventListener('fetch', (event) => {
   if (/^\/(?:api|collab)(?:\/|$)/.test(url.pathname)) return;
   const appRoute =
     request.mode === 'navigate' &&
-    /^\/(?:$|index\.html$|entrar\/?$|activar\/?$|restablecer\/?$|cuenta\/?$|proyectos(?:\/[^/]+)?\/?$|pizarras\/[^/]+\/?$)/.test(
+    /^\/(?:$|index\.html$|entrar\/?$|activar\/?$|restablecer\/?$|cuenta\/?$|sin-conexion\/?$|proyectos(?:\/[^/]+)?\/?$|pizarras\/[^/]+\/?$)/.test(
       url.pathname,
     );
   if (!appRoute && !ASSETS.includes(url.pathname)) return;

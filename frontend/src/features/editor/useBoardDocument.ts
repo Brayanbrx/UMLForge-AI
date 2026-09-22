@@ -10,9 +10,20 @@ import { validateModel, validateProposalPreconditions } from '@uml/domain-core';
 import { readBoardState } from '@uml/yjs-adapter';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Y from 'yjs';
-import { api, currentAccessToken, refreshSession } from '../../lib/api.js';
+import {
+  api,
+  currentAccessToken,
+  refreshSession,
+  sessionRefreshUnavailable,
+} from '../../lib/api.js';
+import { useSession } from '../auth/session.js';
 import { BoardDrafts } from './board-drafts.js';
-import { forgetBoard, rememberBoard, type OfflineBoard } from '../../lib/offline.js';
+import {
+  downgradeBoard,
+  forgetBoard,
+  rememberBoard,
+  type OfflineBoard,
+} from '../../lib/offline.js';
 
 /**
  * Enlaza React con el documento colaborativo.
@@ -68,6 +79,9 @@ function colorPara(clientId: number): string {
   return COLORES[Math.abs(clientId) % COLORES.length] as string;
 }
 
+/** Sin cambios durante este tiempo, la copia para abrir sin conexion se reescribe. */
+const ESPERA_INSTANTANEA = 1000;
+
 export function useBoardDocument(
   room: string | null,
   me: { id: string; displayName: string } | null,
@@ -83,6 +97,7 @@ export function useBoardDocument(
   offline = false,
   board: OfflineBoard | null = null,
 ): BoardDocument {
+  const { activateOfflineCopy } = useSession();
   const [doc, setDoc] = useState(() => new Y.Doc());
   const [canWrite, setCanWrite] = useState(false);
   const [offlineReady, setOfflineReady] = useState(false);
@@ -94,6 +109,45 @@ export function useBoardDocument(
   const [participants, setParticipants] = useState<readonly Participant[]>([]);
   const providerRef = useRef<HocuspocusProvider | null>(null);
   const draftsRef = useRef<BoardDrafts | null>(null);
+  const userId = me?.id;
+  // Una ranura por editor, no por reintento de conexión: volver a consultar la
+  // sesión o los metadatos no debe acumular otra copia completa por edición.
+  const drafts = useMemo(() => {
+    if (userId === undefined || room === null) return null;
+    try {
+      return new BoardDrafts(window.localStorage, userId, room);
+    } catch {
+      return null;
+    }
+  }, [userId, room]);
+
+  /**
+   * Cada modo trabaja sobre su propia replica.
+   *
+   * Al reconectar no se puede enchufar al proveedor la replica que estuvo sin
+   * red: los borradores se mezclan despues, y solo tras confirmar escritura. Y
+   * al perder la red hay que partir del estado autorizado en disco.
+   *
+   * El cambio se hace aqui, ajustando el estado durante el render, y no
+   * remontando el editor desde la ruta: `BoardSession` guarda la conversacion
+   * del asistente y el candidato de importacion en curso — trabajo que puede
+   * haber costado una llamada de IA — y un corte de red no puede tirarlos.
+   * React vuelve a renderizar antes de confirmar, asi que el efecto se ejecuta
+   * una sola vez, ya con el documento nuevo.
+   */
+  const [replicaMode, setReplicaMode] = useState(offline);
+  if (replicaMode !== offline) {
+    setReplicaMode(offline);
+    setDoc(new Y.Doc());
+    setState(emptyBoardState());
+    writeAllowed.current = false;
+    setCanWrite(false);
+    // `conectando` describe exactamente este instante: hay una replica vacia que
+    // todavia no dice nada del modelo. Quien observa la proyeccion lo necesita
+    // para no confundirla con un diagrama al que le borraron todo.
+    setStatus('conectando');
+    setOfflineReady(false);
+  }
 
   useEffect(() => {
     if (room === null || me === null) return;
@@ -101,10 +155,8 @@ export function useBoardDocument(
     setStatus(navigator.onLine ? 'conectando' : 'desconectado');
     setRejection(null);
     setParticipants([]);
-    try {
-      draftsRef.current = new BoardDrafts(window.localStorage, me.id, room);
-    } catch {
-      draftsRef.current = null;
+    draftsRef.current = drafts;
+    if (drafts === null) {
       setAccessNotice('El almacenamiento local no está disponible. No se podrán guardar cambios.');
     }
 
@@ -176,7 +228,12 @@ export function useBoardDocument(
         );
       }
     };
+    let snapshotTimer: number | undefined;
     const saveSnapshot = (): void => {
+      if (snapshotTimer !== undefined) {
+        window.clearTimeout(snapshotTimer);
+        snapshotTimer = undefined;
+      }
       if (!serverSynced || !provider.isAuthenticated || board === null) return;
       try {
         if (draftsRef.current === null) return;
@@ -193,6 +250,26 @@ export function useBoardDocument(
         );
       }
     };
+    /**
+     * Guardar en cada actualizacion del documento codificaba el modelo completo
+     * y lo escribia en `localStorage` de forma sincrona por cada pulsacion de
+     * cualquier participante. Se agrupa: la copia solo tiene que estar al dia
+     * cuando la pestana deja de recibir cambios, se oculta o se cierra.
+     */
+    const scheduleSnapshot = (): void => {
+      if (snapshotTimer !== undefined || !serverSynced || board === null) return;
+      snapshotTimer = window.setTimeout(() => {
+        snapshotTimer = undefined;
+        saveSnapshot();
+      }, ESPERA_INSTANTANEA);
+    };
+    const flushSnapshot = (): void => {
+      if (snapshotTimer !== undefined) saveSnapshot();
+    };
+    // `pagehide` tambien cubre cerrar la pestana; `visibilitychange` el paso a
+    // segundo plano, que en movil es lo ultimo que se ejecuta con garantias.
+    window.addEventListener('pagehide', flushSnapshot);
+    document.addEventListener('visibilitychange', flushSnapshot);
     let lastPermissionWasWrite = writeAllowed.current;
     const permissions = (readOnly: boolean): void => {
       if (disposed) return;
@@ -200,10 +277,16 @@ export function useBoardDocument(
       lastPermissionWasWrite = !readOnly;
       writeAllowed.current = !readOnly;
       setCanWrite(!readOnly);
-      setOfflineReady(false);
-      if (boardId !== null) forgetBoard(me.id, boardId);
+      // También al autenticar una réplica nueva: el rol de la caché puede venir
+      // de una sesión anterior, y no puede esperar a la sincronización.
+      if (readOnly && boardId !== null) downgradeBoard(me.id, boardId);
       if (lostWriteAccess) {
         serverSynced = false;
+        setOfflineReady(false);
+        // La entrada no se retira: la copia sigue siendo la del servidor y su
+        // apertura sin red sigue autorizada, pero solo como lectura. Degradarla
+        // ahora evita que un corte inmediato permita editar lo que ya no se
+        // puede publicar, sin esperar a que termine la resincronizacion.
         setAccessNotice(
           'Tu permiso cambió a solo lectura. Se recargó la pizarra desde el servidor; la copia local se conserva y no se enviará sin permiso de edición.',
         );
@@ -263,8 +346,15 @@ export function useBoardDocument(
       writeAllowed.current = false;
       setCanWrite(false);
       serverSynced = false;
-      setOfflineReady(false);
-      if (boardId !== null) forgetBoard(me.id, boardId);
+      // Un token de acceso vencido no es una revocacion: el proceso de
+      // colaboracion cierra por ese motivo cada vez que expira (cada quince
+      // minutos con una pizarra abierta). Borrar la entrada aqui dejaba la
+      // pizarra inabrible sin red si la renovacion no llegaba a completarse,
+      // aunque la instantanea siguiera intacta en el navegador.
+      if (reason !== 'token-invalido') {
+        setOfflineReady(false);
+        if (boardId !== null) forgetBoard(me.id, boardId);
+      }
       provider.disconnect();
       if (reason === 'token-invalido' && !renovandoToken) {
         renovandoToken = true;
@@ -276,6 +366,14 @@ export function useBoardDocument(
             setStatus('conectando');
             setRejection(null);
             provider.connect();
+            return;
+          }
+          if (sessionRefreshUnavailable()) {
+            setStatus('desconectado');
+            setRejection(null);
+            // El proveedor de sesión reintenta mientras se usa la copia local;
+            // también cuando navigator.onLine sigue siendo true.
+            activateOfflineCopy();
             return;
           }
           accesoRechazado = true;
@@ -339,6 +437,10 @@ export function useBoardDocument(
     // «En vivo» mientras se trabaja sin conexion hace creer que los demas ya
     // recibieron cambios que todavia solo existen en esta replica.
     const alQuedarSinRed = (): void => {
+      // El navegador lo sabe antes que el socket, asi que la conexion todavia
+      // esta autenticada: es el ultimo momento en que se puede guardar lo que
+      // quedara pendiente del agrupado.
+      flushSnapshot();
       setStatus((previo) => (previo === 'rechazado' ? previo : 'desconectado'));
       provider.disconnect();
     };
@@ -354,7 +456,7 @@ export function useBoardDocument(
 
     const alActualizar = (): void => {
       setState(readBoardState(doc));
-      saveSnapshot();
+      scheduleSnapshot();
     };
     doc.on('update', alActualizar);
     alActualizar();
@@ -367,11 +469,16 @@ export function useBoardDocument(
       doc.off('update', alActualizar);
       window.removeEventListener('offline', alQuedarSinRed);
       window.removeEventListener('online', alVolverLaRed);
+      window.removeEventListener('pagehide', flushSnapshot);
+      document.removeEventListener('visibilitychange', flushSnapshot);
+      // Antes de destruir el proveedor: `saveSnapshot` exige que la conexion
+      // siga autenticada para no guardar un estado que el servidor no confirmo.
+      flushSnapshot();
       provider.destroy();
       providerRef.current = null;
       draftsRef.current = null;
     };
-  }, [doc, room, me, offline, board, boardId]);
+  }, [doc, room, me, offline, board, boardId, activateOfflineCopy, drafts]);
 
   // La validacion se recalcula solo cuando cambia el modelo. El layout cambia en
   // cada arrastre y no afecta a la validez.

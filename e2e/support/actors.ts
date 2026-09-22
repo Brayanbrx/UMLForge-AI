@@ -37,7 +37,18 @@ export async function registrarActor(browser: Browser, prefijo: string): Promise
   await page.getByTestId('displayName').fill(displayName);
   await page.getByTestId('password').fill('contrasena-de-prueba');
   await page.getByTestId('enviar').click();
+  await activarCuentaEIniciarSesion(page, email);
 
+  return {
+    page,
+    email,
+    displayName,
+    close: () => context.close(),
+  };
+}
+
+/** Completa el registro también en las pruebas que preparan su propia página. */
+export async function activarCuentaEIniciarSesion(page: Page, email: string): Promise<void> {
   await expect(page.getByTestId('activacion-pendiente')).toBeVisible();
   // Solo en el entorno de pruebas local con MAIL_PROVIDER=log. No hay endpoint
   // de prueba ni tokens de activación en las respuestas públicas.
@@ -77,13 +88,6 @@ export async function registrarActor(browser: Browser, prefijo: string): Promise
   await page.getByTestId('enviar').click();
 
   await expect(page.getByTestId('lista-proyectos')).toBeVisible();
-
-  return {
-    page,
-    email,
-    displayName,
-    close: () => context.close(),
-  };
 }
 
 export async function crearProyecto(actor: Actor, nombre: string): Promise<string> {

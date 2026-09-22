@@ -47,6 +47,43 @@ function createClass(name: string): CommandBatch {
 }
 
 describe('copia local del editor', () => {
+  it('abre varios borradores sin reescribirlos aunque no quede cuota', () => {
+    const storage = new MemoryStorage();
+    const snapshot = new Y.Doc();
+    const first = new Y.Doc();
+    const second = new Y.Doc();
+    const reopened = new Y.Doc();
+    const drafts = new BoardDrafts(storage, 'ana', 'ventas');
+    drafts.snapshot(snapshot);
+    new BoardDrafts(storage, 'ana', 'ventas').apply(first, createClass('Primera'));
+    new BoardDrafts(storage, 'ana', 'ventas').apply(second, createClass('Segunda'));
+    const before = Array.from({ length: storage.length }, (_, index) => {
+      const key = storage.key(index)!;
+      return [key, storage.getItem(key)] as const;
+    });
+    let writes = 0;
+    storage.setItem = () => {
+      writes++;
+      throw new Error('QuotaExceededError');
+    };
+    try {
+      expect(drafts.openOffline(reopened, true)).toBe(true);
+      expect(
+        readBoardState(reopened)
+          .semantic.classes.map((item) => item.displayName)
+          .sort(),
+      ).toEqual(['Primera', 'Segunda']);
+      expect(writes).toBe(0);
+      expect(storage.length).toBe(before.length);
+      for (const [key, value] of before) expect(storage.getItem(key)).toBe(value);
+    } finally {
+      snapshot.destroy();
+      first.destroy();
+      second.destroy();
+      reopened.destroy();
+    }
+  });
+
   it('abre una pizarra visitada sin ediciones y conserva actualizaciones remotas', () => {
     const storage = new MemoryStorage();
     const doc = new Y.Doc();

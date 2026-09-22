@@ -4,6 +4,7 @@ import {
   apiRequest,
   currentAccessToken,
   setAccessToken,
+  NetworkError,
   login,
   logout,
   refreshSession,
@@ -15,6 +16,32 @@ import {
 import type { CommandBatch } from '@uml/contracts';
 
 describe('cliente HTTP', () => {
+  it.each(['red', 'servidor', 'plazo'] as const)(
+    'conserva el fallo de %s al renovar una petición con acceso vencido',
+    async (failure) => {
+      setAccessToken('acceso-expirado');
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: string) => {
+          if (!input.endsWith('/refresh'))
+            return jsonResponse(401, { error: { code: 'unauthorized' } });
+          if (failure === 'red') throw new TypeError('Failed to fetch');
+          if (failure === 'plazo') throw new DOMException('Tiempo agotado', 'TimeoutError');
+          return jsonResponse(503, {
+            error: { code: 'unavailable', message: 'Servicio temporalmente no disponible' },
+          });
+        }),
+      );
+
+      const request = api.getBoard('pizarra');
+      if (failure === 'red') await expect(request).rejects.toBeInstanceOf(NetworkError);
+      else
+        await expect(request).rejects.toMatchObject(
+          failure === 'plazo' ? { name: 'TimeoutError' } : { status: 503, code: 'unavailable' },
+        );
+    },
+  );
+
   it('espera un logout pendiente antes de iniciar otra cuenta', async () => {
     let finishLogout!: (response: Response) => void;
     const calls: string[] = [];

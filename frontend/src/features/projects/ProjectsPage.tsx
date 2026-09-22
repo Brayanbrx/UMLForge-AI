@@ -20,7 +20,7 @@ const ROLE_LABEL = { OWNER: 'Propietario', EDITOR: 'Editor', VIEWER: 'Lector' } 
 
 /** Lista de proyectos y creación (RF-001, RF-A04). */
 export function ProjectsPage(): React.JSX.Element {
-  const { user, logout } = useSession();
+  const { user, logout, offline } = useSession();
   const { error, pending, run } = useAsyncAction();
   const [proyectos, setProyectos] = useState<readonly ProjectSummary[]>([]);
   const [nombre, setNombre] = useState('');
@@ -32,8 +32,8 @@ export function ProjectsPage(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    void run(recargar);
-  }, [recargar, run]);
+    if (!offline) void run(recargar);
+  }, [recargar, run, offline]);
 
   return (
     <div className="marco">
@@ -203,7 +203,7 @@ function ProjectSession({
 }: {
   readonly projectId: string | undefined;
 }): React.JSX.Element {
-  const { user, logout } = useSession();
+  const { user, logout, offline } = useSession();
   const { error, pending, run } = useAsyncAction();
   const [proyecto, setProyecto] = useState<ProjectDetail | null>(null);
   const [nombre, setNombre] = useState('');
@@ -215,9 +215,8 @@ function ProjectSession({
   }, [projectId]);
 
   useEffect(() => {
-    setProyecto(null);
-    void run(recargar);
-  }, [recargar, run]);
+    if (!offline) void run(recargar);
+  }, [recargar, run, offline]);
 
   if (proyecto === null) {
     return (

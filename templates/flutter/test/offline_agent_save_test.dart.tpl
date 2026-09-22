@@ -141,9 +141,12 @@ void main() {
       expect(api.sent, 0);
       api.connection.completeError(Exception('offline'));
       await checking;
+      expect(model.serverReachable, isFalse);
+      expect(model.message, contains('No se pudo conectar'));
       expect((await local.queue()).length, 1);
       api.connection = Completer<void>()..complete();
       await model.sync();
+      expect(model.serverReachable, isTrue);
       expect(api.sent, 1);
       expect(await local.queue(), isEmpty);
       expect((await local.rows('clientes')).single['nombre'], 'Ana');

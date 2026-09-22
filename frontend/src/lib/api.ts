@@ -31,22 +31,38 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * El servidor no llego a contestar.
+ *
+ * No es un `ApiError`: no hay respuesta ni codigo que interpretar, y quien
+ * distingue «el servidor rechazo esto» de «no hubo servidor» necesita que los
+ * dos casos no compartan tipo. `fetch` lo senala con un `TypeError`, el mismo
+ * que produciria un error de programacion en esta capa, asi que se traduce en el
+ * unico sitio que sabe que venia de la red.
+ */
+export class NetworkError extends Error {
+  public constructor(cause: unknown) {
+    super('No se pudo contactar al servidor.', { cause });
+    this.name = 'NetworkError';
+  }
+}
+
 let accessToken: string | null = null;
 let sessionUserId: string | null = null;
 let sessionRevision = 0;
 let refreshInFlight: Promise<boolean> | null = null;
 let signingOut = false;
 let logoutInFlight: Promise<void> | null = null;
-let refreshUnavailable = false;
+let refreshFailure: unknown = null;
 
 /** A failed network/server request must not be mistaken for rejected credentials. */
 export function sessionRefreshUnavailable(): boolean {
-  return refreshUnavailable;
+  return refreshFailure !== null;
 }
 
 export function isConnectionUnavailable(error: unknown): boolean {
   return (
-    error instanceof TypeError ||
+    error instanceof NetworkError ||
     (error instanceof ApiError && error.status >= 500) ||
     (error instanceof Error && error.name === 'TimeoutError')
   );
@@ -103,6 +119,10 @@ async function requestWithSession<T>(
     if (renovado) {
       respuesta = await enviar(path, options);
       comprobarSesion();
+    } else if (refreshFailure !== null) {
+      // El 401 pertenecía al acceso vencido. La renovación no pudo comprobar
+      // la sesión: conserva su causa para permitir la copia local y el reintento.
+      throw refreshFailure;
     }
   }
 
@@ -121,14 +141,25 @@ async function enviar(path: string, options: RequestOptions): Promise<Response> 
   if (accessToken !== null) headers['authorization'] = `Bearer ${accessToken}`;
   if (options.body !== undefined) headers['content-type'] = 'application/json';
 
-  return fetch(`/api${path}`, {
+  // Fuera del `try`: serializar un cuerpo imposible tambien lanza `TypeError`, y
+  // eso es un error de programacion, no una red caida.
+  const peticion: RequestInit = {
     method: options.method ?? 'GET',
     headers,
     // Sin esto la cookie de refresco no viaja y la sesion se pierde al recargar.
     credentials: 'include',
     ...(options.signal === undefined ? {} : { signal: options.signal }),
     ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-  });
+  };
+
+  try {
+    return await fetch(`/api${path}`, peticion);
+  } catch (error) {
+    // Un aborto o un plazo vencido son decisiones nuestras: los distingue su
+    // propio nombre y suben tal cual.
+    if (error instanceof TypeError) throw new NetworkError(error);
+    throw error;
+  }
 }
 
 async function leer<T>(respuesta: Response): Promise<T> {
@@ -250,7 +281,7 @@ export function refreshSession(): Promise<boolean> {
 
 async function performRefresh(): Promise<boolean> {
   if (signingOut) return false;
-  refreshUnavailable = false;
+  refreshFailure = null;
   const revision = sessionRevision;
   const previousUserId = sessionUserId;
   try {
@@ -269,7 +300,7 @@ async function performRefresh(): Promise<boolean> {
     void flushAuditQueue().catch(() => undefined);
     return true;
   } catch (error) {
-    refreshUnavailable = isConnectionUnavailable(error);
+    refreshFailure = isConnectionUnavailable(error) ? error : null;
     if (revision === sessionRevision) accessToken = null;
     return false;
   }

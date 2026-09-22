@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
-import 'local_agent.dart';
+import '../domain/assistant_ports.dart';
 
 /// IA en linea con los mismos proveedores y nombres de variable que
 /// `infra/.env` del generador, para copiar y pegar la configuracion.
@@ -135,7 +135,8 @@ class RemoteAiSettings {
 
   String operator [](String key) => values[key] ?? '';
   void set(String key, String value) {
-    if (!keys.contains(key)) throw FormatException('Variable desconocida: $key');
+    if (!keys.contains(key))
+      throw FormatException('Variable desconocida: $key');
     final clean = value.trim();
     if (clean.isEmpty) {
       values.remove(key);
@@ -348,7 +349,7 @@ Future<String> transcribeRemoteAudio(
   try {
     final response = await http.Response.fromStream(
       await own.send(request).timeout(timeout),
-    );
+    ).timeout(timeout);
     if (response.statusCode >= 400) _reject(p, response);
     final body = jsonDecode(_texto(response));
     final text = body is Map ? body['text'] : null;

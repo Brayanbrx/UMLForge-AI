@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { nuevoCorreo } from '../support/actors.js';
+import { activarCuentaEIniciarSesion, nuevoCorreo } from '../support/actors.js';
 import type { SpeechRecognitionLike } from '../../frontend/src/features/assistant/speech-session.js';
 
 interface SpeechControl {
@@ -65,10 +65,12 @@ async function abrirAsistente(page: Page) {
   });
   await page.goto('/entrar');
   await page.getByRole('button', { name: 'Crear cuenta', exact: true }).click();
-  await page.getByTestId('email').fill(nuevoCorreo('dictado'));
+  const email = nuevoCorreo('dictado');
+  await page.getByTestId('email').fill(email);
   await page.getByTestId('displayName').fill('Dictado');
   await page.getByTestId('password').fill('contrasena-de-prueba');
   await page.getByTestId('enviar').click();
+  await activarCuentaEIniciarSesion(page, email);
   await page.getByTestId('nombre-proyecto').fill('Voz');
   await page.getByTestId('crear-proyecto').click();
   await page.getByTestId('nombre-pizarra').fill('Dictado');

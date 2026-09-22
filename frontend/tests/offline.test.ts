@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   cachedBoard,
   cachedBoards,
+  downgradeBoard,
   forgetBoard,
   forgetUser,
   markLogout,
@@ -50,6 +51,43 @@ describe('identidad y catálogo offline', () => {
     forgetBoard('ana', board.id);
     expect(cachedBoards('ana')).toEqual([]);
     expect(localStorage.getItem('uml_board_draft_v1:ana:room:tab')).toBe('pending');
+  });
+
+  it('degrada la entrada a lectura al perder la edición, sin retirarla', () => {
+    vi.stubGlobal('localStorage', storage());
+    const board = {
+      id: 'board',
+      projectId: 'project',
+      displayName: 'Ventas',
+      room: 'room',
+      role: 'OWNER' as const,
+    };
+    rememberBoard('ana', board);
+    downgradeBoard('ana', board.id);
+    // La copia sigue siendo la del servidor: se puede abrir, pero no editar.
+    expect(cachedBoard('ana', board.id)?.role).toBe('VIEWER');
+    downgradeBoard('ana', board.id);
+    expect(cachedBoard('ana', board.id)?.role).toBe('VIEWER');
+    expect(() => downgradeBoard('ana', 'inexistente')).not.toThrow();
+    expect(cachedBoard('ana', 'inexistente')).toBeNull();
+  });
+
+  it('sin espacio para degradarla, retira la entrada en lugar de dejar el rol anterior', () => {
+    const almacen = storage();
+    vi.stubGlobal('localStorage', almacen);
+    const board = {
+      id: 'board',
+      projectId: 'project',
+      displayName: 'Ventas',
+      room: 'room',
+      role: 'EDITOR' as const,
+    };
+    rememberBoard('ana', board);
+    almacen.setItem = () => {
+      throw new DOMException('Cuota agotada', 'QuotaExceededError');
+    };
+    downgradeBoard('ana', board.id);
+    expect(cachedBoard('ana', board.id)).toBeNull();
   });
 
   it('guarda solo el perfil y bloquea restaurarlo cuando queda un logout pendiente', () => {
