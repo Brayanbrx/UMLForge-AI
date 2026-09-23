@@ -3,17 +3,13 @@ import { defineConfig } from 'vitest/config';
 
 /**
  * Pruebas de integracion de la API.
- *
- * Van aparte de `npm test` a proposito: levantan un PostgreSQL en Docker y
- * aplican las migraciones, asi que tardan segundos en lugar de milisegundos. El
- * bucle rapido del nucleo de dominio no debe depender de Docker (RNF-15).
- *
- *   npm run test:api
+ * Levantan un PostgreSQL en Docker y aplican las migraciones, asi que tardan segundos en lugar de milisegundos
+ * El bucle rapido del nucleo de dominio no debe depender de Docker
  */
 export default defineConfig({
-  // Vitest toma como raiz la carpeta del archivo de configuracion. Este vive en
-  // `config/`, asi que se ancla al repositorio: sin esto buscaria las pruebas
-  // dentro de `config/` y no encontraria ninguna.
+  // Vitest toma como raiz la carpeta del archivo de configuracion
+  // Este vive en config/, asi que se ancla al repositorio: sin esto buscaria las pruebas
+  // dentro de `config/` y no encontraria ninguna
   root: fileURLToPath(new URL('..', import.meta.url)),
   test: {
     environment: 'node',
