@@ -3,19 +3,11 @@ import type { PrismaClient } from '@prisma/client';
 import { forbidden, notFound } from '../../lib/http-error.js';
 
 /**
- * Autorizacion por proyecto (plan maestro 5.5).
- *
- * | Rol      | Puede                                                        |
- * |----------|--------------------------------------------------------------|
- * | OWNER    | Todo, mas invitar, cambiar roles y eliminar el proyecto       |
- * | EDITOR   | Crear y editar pizarras, usar el asistente, generar codigo    |
- * | VIEWER   | Ver pizarras y consultar al asistente sin modificar           |
- *
- * Este modulo es la unica puerta. El proceso de colaboracion resuelve lo mismo
- * en su propio proceso (fase 4) reusando estas reglas, porque proteger las rutas
- * HTTP sin autorizar la conexion WebSocket no sirve de nada (RA-15).
+ * Autorizacion por proyecto
+ * 1. OWNER: Todo, mas invitar, cambiar roles y eliminar el proyecto
+ * 2. EDITOR: Crear y editar pizarras, usar el asistente, generar codigo
+ * 3. VIEWER: Ver pizarras y consultar al asistente sin modificar
  */
-
 export const ROLE_RANK: Readonly<Record<ProjectRole, number>> = {
   VIEWER: 0,
   EDITOR: 1,
@@ -27,10 +19,9 @@ export function isProjectRole(value: string): value is ProjectRole {
 }
 
 /**
- * Devuelve el rol del usuario en el proyecto.
- *
+ * Devuelve el rol del usuario en el proyecto
  * Un no miembro recibe 404 y no 403: responder "no tienes permiso" confirmaria
- * que el proyecto existe a quien solo esta probando identificadores.
+ * que el proyecto existe a quien solo esta probando identificadores
  */
 export async function requireMembership(
   prisma: PrismaClient,
@@ -60,7 +51,7 @@ export async function requireRole(
   return role;
 }
 
-/** Escritura sobre pizarras: OWNER y EDITOR si, VIEWER no. */
+// Escritura sobre pizarras: OWNER y EDITOR si, VIEWER no
 export async function requireWriteAccess(
   prisma: PrismaClient,
   projectId: string,

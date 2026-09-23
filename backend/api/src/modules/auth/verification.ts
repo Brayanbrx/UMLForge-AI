@@ -38,7 +38,7 @@ export async function sendVerification(
   if (reserved.count !== 1) return false;
 
   try {
-    // Fragmento: el token no viaja en los registros HTTP ni en el Referer.
+    // Fragmento: el token no viaja en los registros HTTP ni en el Referer
     const link = `${config.WEB_ORIGIN}/activar#token=${token.token}`;
     await mail.send({
       to: user.email,
@@ -54,7 +54,7 @@ export async function sendVerification(
     });
     return true;
   } catch {
-    // No dejar bloqueada la cuenta ni invalidar el último enlace entregado.
+    // No dejar bloqueada la cuenta ni invalidar el último enlace entregado
     await app.prisma.user.updateMany({
       where: { id: user.id, emailVerificationTokenHash: token.hash, emailVerifiedAt: null },
       data: {
@@ -78,7 +78,7 @@ export async function verificationRoutes(
     if (user !== null && user.emailVerifiedAt === null) {
       await sendVerification(app, config, mail, user);
     }
-    // Misma respuesta para inexistentes, activadas y envíos limitados o fallidos.
+    // Misma respuesta para inexistentes, activadas y envíos limitados o fallidos
     reply.code(202);
     return { sent: true };
   });

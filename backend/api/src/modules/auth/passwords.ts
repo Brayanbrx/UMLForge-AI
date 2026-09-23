@@ -16,21 +16,7 @@ const scrypt = promisify(scryptCallback) as (
 ) => Promise<Buffer>;
 
 /**
- * Derivacion de contrasenas (RNF-08).
- *
- * scrypt, de `node:crypto`. Lenta y dura en memoria por diseno: el coste de
- * probar una contrasena no baja comprando hardware paralelo barato.
- *
- * Argon2id seria la primera recomendacion actual. Se descarta por una razon
- * concreta, no por preferencia: las implementaciones de Argon2 para Node son
- * modulos nativos, y un modulo nativo es la fuente numero uno de "en mi maquina
- * si funciona" — distinta arquitectura, distinta libc entre Alpine y Windows,
- * cadena de compilacion ausente. A tres semanas de la defensa, esa clase de
- * fallo cuesta mas de lo que la diferencia entre scrypt y Argon2id protege, con
- * los parametros de abajo. Queda anotado en ADR-014 como via de mejora.
- *
- * Parametros: N=2^16, r=8, p=1, clave de 64 bytes, sal de 16 bytes aleatorios.
- * `maxmem` se sube porque el valor por defecto de Node no alcanza para N=2^16.
+ * Derivacion de contraseñas
  */
 const SCRYPT_COST = 2 ** 16;
 const SCRYPT_BLOCK_SIZE = 8;
@@ -49,11 +35,10 @@ const scryptOptions = {
 } as const;
 
 /**
- * Devuelve una cadena autodescriptiva.
- *
+ * Devuelve una cadena autodescriptiva
  * Llevar el algoritmo y sus parametros dentro del propio hash permite subirlos
  * mas adelante sin invalidar las contrasenas existentes: se comprueban con los
- * parametros con los que se guardaron.
+ * parametros con los que se guardaron
  */
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(SALT_LENGTH);

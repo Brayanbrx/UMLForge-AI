@@ -11,18 +11,16 @@ declare module 'fastify' {
 }
 
 /**
- * Cliente de base de datos, uno por proceso.
- *
- * Prisma 7 exige un adaptador de controlador explicito. Se cierra al apagar el
- * servidor para que las conexiones no queden colgando entre reinicios en
- * desarrollo.
+ * Cliente de base de datos. Prisma 7 exige un adaptador de controlador explicito.
+ * Se cierra al apagar el servidor para que las conexiones no queden colgando
+ * entre reinicios en desarrollo
  */
 export const prismaPlugin = fp(
   async (app: FastifyInstance, options: { config: Config }) => {
     const adapter = new PrismaPg({
       connectionString: options.config.DATABASE_URL,
-      connectionTimeoutMillis: 3000,
-      statement_timeout: 5000,
+      connectionTimeoutMillis: 3000,  // tiempo de conexion
+      statement_timeout: 5000,        // tiempo de duracion
     });
     const prisma = new PrismaClient({ adapter });
 

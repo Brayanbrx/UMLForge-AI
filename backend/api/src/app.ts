@@ -25,17 +25,15 @@ export const SERVICE_NAME = 'api';
 
 /**
  * Construye la aplicacion sin escucharla. Separar construccion de escucha es lo
- * que permite probarla por inyeccion, sin abrir un puerto.
+ * que permite probarla por inyeccion, sin abrir un puerto
  */
 export async function buildApp(
   config: Config = loadConfig(),
   options: { mail?: MailPort } = {},
 ): Promise<FastifyInstance> {
   const app = Fastify({
-    // RNF-14: registro estructurado. Los campos de proyecto, pizarra, sesion,
-    // lote, comando, generacion, actor y origen se anaden por peticion en las
-    // fases que los introducen. Bajo pruebas el registro se apaga entero: el
-    // ruido de cada peticion inyectada no aporta nada al diagnostico.
+    // Registro estructurado. Los campos de proyecto, pizarra, sesion, lote, comando,
+    // generacion, actor y origen se anaden por peticion en las fases que los introducen.
     logger:
       config.NODE_ENV === 'test'
         ? false
@@ -50,8 +48,7 @@ export async function buildApp(
   });
 
   await app.register(cors, {
-    // An exact allowlist: sibling domains, HTTP and direct IP access do not
-    // receive CORS permissions. WEB_ORIGIN also defines password-reset links.
+    // CORS = Cross Origin Resource sharing, intercambio de recursos
     origin: [config.WEB_ORIGIN],
     credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -73,6 +70,7 @@ export async function buildApp(
     uptimeSeconds: Math.round(process.uptime()),
   }));
 
+  // La App esta viva ? PostgreSQL y Collab
   app.get('/ready', async (_request, reply) => {
     try {
       await app.prisma.$queryRaw`SELECT 1`;
@@ -86,13 +84,9 @@ export async function buildApp(
     }
   });
 
-  // Una sola pasarela de IA para todo el proceso. Antes el asistente y la
-  // importacion construian la suya por separado, con lo que el registro de uso
-  // quedaba partido en dos y ninguno contaba la historia completa.
+  // Una sola pasarela de IA para todo el proceso.
   const aiConfig = loadAiConfig();
   const aiPorts = createAiPorts(aiConfig);
-  // Que cadena esta activa, antes de la primera llamada: evita la conversacion
-  // de «¿pero esto esta usando el simulado?» en mitad de una demostracion.
   app.log.info({ cadenas: describeAiChains(aiConfig) }, 'capa de IA');
 
   const mail =
@@ -120,10 +114,8 @@ export async function buildApp(
 }
 
 /**
- * Cuerpo de error uniforme para toda la API.
- *
- * Un solo formato hace que el cliente tenga un solo camino de manejo. Es la
- * misma idea que RTM-10 aplica al backend generado.
+ * Cuerpo de error uniforme para toda la API
+ * Un solo formato hace que el cliente tenga un solo camino de manejo
  */
 function errorHandler(
   error: unknown,
@@ -159,11 +151,10 @@ function errorHandler(
 
   // Fastify rechaza por su cuenta antes de llegar a la ruta: cuerpo vacio con
   // content-type JSON, carga demasiado grande, JSON mal formado. Traen su propio
-  // codigo de estado y hay que respetarlo.
+  // codigo de estado y hay que respetarlo
   //
-  // Devolver 500 por un error del cliente no es solo impreciso: hace perder
-  // tiempo buscando un fallo del servidor que no existe, y ensucia los registros
-  // de errores con ruido que nadie puede arreglar.
+  // Devolver 500 por un error del cliente hace perder tiempo buscando un fallo del servidor que no existe
+  // ensucia los registros de errores con ruido que nadie puede arreglar.
   const conEstado = error as { statusCode?: unknown; code?: unknown; message?: unknown };
   if (
     typeof conEstado.statusCode === 'number' &&

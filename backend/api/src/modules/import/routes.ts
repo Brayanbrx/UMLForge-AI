@@ -24,34 +24,12 @@ import { HttpError } from '../../lib/http-error.js';
 import { currentUser } from '../../plugins/auth.js';
 import { requireMembership, requireWriteAccess } from '../projects/membership.js';
 
-/**
- * Importacion por fotografia y XMI, y exportacion a XMI (M4 y M5).
- *
- * **Nada se aplica aqui.** Las dos importaciones producen un candidato que la
- * interfaz muestra para corregir, y el navegador lo aplica por el mismo camino
- * que la interfaz grafica y que el asistente. Un candidato que no se puede
- * corregir no sirve: el reconocimiento de un pizarron se va a equivocar en algo
- * (CA-042.1).
- */
-
+// Importacion por fotografia y XMI, y exportacion a XMI.
 const boardParams = z.object({ boardId: z.string().uuid() });
 
-/**
- * Ocho megabytes en base64 son unos seis de imagen: una fotografia de movil
- * cabe de sobra. El limite existe porque sin el, una peticion grande ocupa
- * memoria del proceso antes de que nadie la valide (RNF-08).
- */
+// Ocho megabytes en base64 son unos seis de imagen
 const MAX_IMAGE_BASE64 = 8_000_000;
 
-/**
- * El limite de cuerpo de Fastify es un megabyte por defecto, y una fotografia de
- * movil en base64 pasa de eso siempre. Sin subirlo, la ruta de imagen no habria
- * aceptado **ninguna foto real**: la rechazaria con un 413 antes de mirarla, y
- * el limite de arriba nunca se habria alcanzado.
- *
- * Se sube por ruta y no globalmente: el resto de la API no tiene por que aceptar
- * cuerpos de megabytes.
- */
 const IMAGE_BODY_LIMIT = 12 * 1024 * 1024;
 const XMI_BODY_LIMIT = 24 * 1024 * 1024;
 
@@ -76,7 +54,7 @@ export async function importRoutes(
 
   app.addHook('preHandler', app.authenticate);
 
-  /** RF-040 a RF-043: fotografia a candidato editable. */
+  // Fotografia a candidato editable
   app.post('/boards/:boardId/import/image', { bodyLimit: IMAGE_BODY_LIMIT }, async (request) => {
     const { boardId } = boardParams.parse(request.params);
     const body = imageBody.parse(request.body);
@@ -92,9 +70,6 @@ export async function importRoutes(
       }),
     );
 
-    // Tolerante: la lectura ya se pago. Lo que no se pueda resolver —una clase
-    // que ya estaba, una duda que el modelo dejo escrita— se omite y viaja como
-    // aviso con el candidato, en vez de tirar todo y obligar a otra lectura.
     const { skipped = [], ...outcome } = resolveProposal({
       proposal: conBorradoPrevio(proposal, body.mode, body.model),
       model: body.model,
@@ -116,10 +91,8 @@ export async function importRoutes(
       'importacion por imagen',
     );
 
-    // Si la lectura llego al tope, lo mas probable es que la fotografia tuviera
-    // mas de lo que cabe en una propuesta. Se avisa en lugar de entregar un
-    // modelo incompleto con aspecto de completo: quien importa un diagrama de
-    // ocho tablas no puede tener que contar los atributos para descubrirlo.
+    // Si la lectura llego al tope, lo mas probable es que la
+    // fotografia tuviera mas de lo que cabe en una propuesta
     const warnings = [
       ...skipped,
       ...(pareceTruncada(proposal)
@@ -138,7 +111,7 @@ export async function importRoutes(
     return { ...outcome, rationale: proposal.rationale ?? null, warnings };
   });
 
-  /** RF-051 y RF-052: XMI a candidato editable, validado contra el dominio. */
+  // XMI a candidato editable, validado contra el dominio
   app.post('/boards/:boardId/import/xmi', { bodyLimit: XMI_BODY_LIMIT }, async (request) => {
     const { boardId } = boardParams.parse(request.params);
     const body = xmiBody.parse(request.body);
@@ -164,9 +137,7 @@ export async function importRoutes(
     });
     const warnings = [...importado.warnings, ...(propuesta.skipped ?? [])];
 
-    // Volver a importar el mismo archivo es una operacion valida y frecuente.
-    // No se convierte en una pregunta sin botones: se informa que se leyo bien
-    // y que no habia nada nuevo que aplicar.
+    // Volver a importar el mismo archivo es una operacion valida y frecuente
     if (propuesta.batch.commands.length === 0) {
       return {
         kind: 'NO_CHANGES' as const,
@@ -176,9 +147,7 @@ export async function importRoutes(
       };
     }
 
-    // La propuesta pasa por el mismo contrato que la del asistente: si la
-    // importacion produjera algo fuera del vocabulario, se ve aqui y no al
-    // aplicarlo.
+    // La propuesta pasa por el mismo contrato que la del asistente
     const outcome =
       body.mode === 'REPLACE' && body.model.classes.length > 0
         ? {
@@ -207,10 +176,9 @@ export async function importRoutes(
   });
 
   /**
-   * RF-050: exportar a XMI.
-   *
+   * Exportar a XMI
    * Basta con ser miembro: exportar no modifica nada, y un rol de solo lectura
-   * tiene tanto derecho a llevarse el diagrama como cualquier otro.
+   * tiene tanto derecho a llevarse el diagrama como cualquier otro
    */
   app.post('/boards/:boardId/export/xmi', async (request, reply) => {
     const { boardId } = boardParams.parse(request.params);
@@ -243,12 +211,7 @@ export async function importRoutes(
   });
 }
 
-/**
- * En modo de reemplazo, el borrado va delante y en el mismo lote.
- *
- * Se hace aqui y no en el puerto de vision porque el modelo no tiene por que
- * saber que va a pasar con su candidato: solo transcribe lo que ve.
- */
+// En modo de reemplazo, el borrado va delante.
 function conBorradoPrevio(
   proposal: BatchProposal,
   mode: 'ADD' | 'REPLACE',
@@ -299,7 +262,7 @@ async function findBoard(
   return board;
 }
 
-/** Un nombre de archivo que no rompa la cabecera ni el sistema de archivos. */
+// Un nombre de archivo que no rompa la cabecera ni el sistema de archivos
 function nombreDeArchivo(displayName: string): string {
   const limpio = displayName
     .normalize('NFD')

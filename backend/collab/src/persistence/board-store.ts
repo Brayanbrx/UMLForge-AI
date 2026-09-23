@@ -3,13 +3,11 @@ import type { PrismaClient } from '@prisma/client';
 import * as Y from 'yjs';
 
 /**
- * Persistencia del documento (RA-11).
+ * Persistencia del documento
+ * El documento se guarda en su representacion binaria, es lo unico que puede reabrir
+ * la sesion colaborativa conservando el historial de operaciones del CRDT.
  *
- * El documento se guarda en su representacion binaria nativa, que es lo unico
- * que puede reabrir la sesion colaborativa conservando el historial de
- * operaciones del CRDT.
- *
- * El JSON canonico se guarda **ademas**, como proyeccion derivada, para validar,
+ * El JSON canonico se guarda. como proyeccion derivada, para validar,
  * generar e inspeccionar sin cargar Yjs. Nunca reconstruye el documento: si
  * alguna vez se intentara, se perderia el historial y dos replicas que estaban
  * convergiendo dejarian de hacerlo.
@@ -45,9 +43,7 @@ export async function storeBoardDocument(
       create: { boardId, state },
       update: { state },
     }),
-    // La proyeccion se guarda siempre en la version 1: las versiones numeradas
-    // son para los snapshots inmutables de generacion (RA-08), que congela el
-    // proceso HTTP cuando alguien pulsa generar. Esta es solo la foto vigente.
+
     prisma.boardSnapshot.upsert({
       where: { boardId_version: { boardId, version: 1 } },
       create: { boardId, version: 1, canonicalJson },

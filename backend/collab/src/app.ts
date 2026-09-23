@@ -2,7 +2,7 @@ import { roleCanWrite, SCHEMA_VERSION } from '@uml/contracts';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import {
-  IncomingMessage as HocuspocusIncomingMessage,
+  IncomingMessage as HocuspocusIncomingMessage, // Servidor Colaborativo
   MessageType,
   Server,
   type Connection,
@@ -20,20 +20,7 @@ import { loadBoardDocument, storeBoardDocument } from './persistence/board-store
 export const SERVICE_NAME = 'collab';
 
 /**
- * Fuerza la escritura del documento vivo antes de generar (RA-08).
- *
- * **Por que hace falta.** La proyeccion canonica se guarda con retardo: escribir
- * en cada tecla castigaria la base sin ganar nada, porque el estado vivo esta en
- * memoria y replicado en cada navegador. Pero eso significa que la base puede ir
- * hasta diez segundos por detras de lo que la persona ve en pantalla, y quien
- * pulsa «generar» justo despues de dibujar una clase obtendria un proyecto sin
- * esa clase. Se detecto generando desde el navegador: la primera version genero
- * cero entidades sobre una pizarra que mostraba una.
- *
- * **Por que con el token de quien pide.** No hay secreto nuevo entre procesos:
- * el proceso HTTP reenvia el token del usuario y aqui se resuelve exactamente la
- * misma autorizacion que para conectarse a la sala (RA-15). Quien no puede
- * abrir la pizarra tampoco puede provocar una escritura en ella.
+ * Fuerza la escritura del documento vivo antes de generar
  */
 async function atenderVolcado(options: {
   server: Server<CollaborationContext>;
@@ -79,10 +66,8 @@ async function atenderVolcado(options: {
     return;
   }
 
-  const document = server.hocuspocus.documents.get(room);
+  const document = server.hocuspocus.documents.get(room); // Hopuscopus mantiene los documentos abiertos en memoria
 
-  // Sin documento cargado no hay nada mas reciente que lo que ya esta en la
-  // base: nadie tiene la pizarra abierta, asi que lo guardado es lo vigente.
   if (document === undefined) {
     responder(200, { stored: false });
     return;
@@ -117,12 +102,9 @@ export interface CollabServer {
 }
 
 /**
- * Proceso de colaboracion.
- *
- * Una sala por pizarra, `project:{projectId}:board:{boardId}`. Cada sala tiene su
- * propio documento, y por eso dos pizarras del mismo proyecto no mezclan
- * actualizaciones (CA-004.1): son dos documentos distintos, no dos vistas del
- * mismo.
+ * Proceso de colaboracion
+ * Cada sala tiene su propio documento, y por eso dos pizarras del mismo proyecto
+ * no mezclan actualizaciones: son dos documentos distintos, no dos vistas del mismo.
  */
 export function buildCollabServer(config: Config): CollabServer {
   const adapter = new PrismaPg({ connectionString: config.DATABASE_URL });
@@ -132,8 +114,8 @@ export function buildCollabServer(config: Config): CollabServer {
   const server = new Server<CollaborationContext>({
     port: config.COLLAB_PORT,
     address: config.COLLAB_HOST,
-    // El apagado lo gobierna el proceso, no la libreria: asi se cierra tambien
-    // la conexion a la base.
+    // El apagado lo gobierna el proceso, no la libreria:
+    // asi se cierra tambien la conexion a la base.
     stopOnSignals: false,
     quiet: config.NODE_ENV !== 'development',
 
@@ -141,8 +123,7 @@ export function buildCollabServer(config: Config): CollabServer {
     maxDebounce: config.STORE_MAX_DEBOUNCE_MS,
 
     /**
-     * RA-15: se autoriza antes de entregar el documento.
-     *
+     * Se autoriza antes de entregar el documento
      * Lanzar aqui rechaza la conexion. Hocuspocus solo llama a este gancho si el
      * cliente envia un token, asi que una conexion sin token nunca queda
      * autenticada y no recibe nada.
@@ -174,14 +155,14 @@ export function buildCollabServer(config: Config): CollabServer {
 
       const { context, readOnly } = resultado;
 
-      // CA-A08.2: el rol de lectura se conecta y ve, pero el servidor descarta
+      // El rol de lectura se conecta y ve, pero el servidor descarta
       // sus escrituras. No basta con ocultarlas en la interfaz.
       data.connectionConfig.readOnly = readOnly;
 
       return context;
     },
 
-    /** RA-11: se rehidrata desde la representacion binaria nativa. */
+    /** Se rehidrata desde la representacion binaria nativa. */
     async onLoadDocument(data) {
       const { boardId } = parseRoomName(data.documentName);
       await loadBoardDocument(prisma, boardId, data.document);
@@ -268,10 +249,9 @@ export function buildCollabServer(config: Config): CollabServer {
     },
 
     /**
-     * Sonda de vida, y nada mas. Todo el trafico util de este proceso va por
-     * WebSocket.
-     *
-     * El gancho atiende **todas** las rutas, no solo `/health`. Si resolviera sin
+     * Sonda de vida.
+     * Todo el trafico util de este proceso va por WebSocket.
+     * El gancho atiende todas las rutas, no solo `/health`. Si resolviera sin
      * escribir, Hocuspocus responderia su propio 200 con un texto que nombra el
      * software: superficie HTTP que nadie vigila y una pista gratuita sobre la
      * pila para quien este mirando.

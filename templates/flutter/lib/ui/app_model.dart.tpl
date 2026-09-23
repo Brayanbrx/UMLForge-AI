@@ -266,6 +266,7 @@ class AppModel extends ChangeNotifier {
           expected: expected,
         );
       }
+      assistantSession.recordCommitted(draft);
       assistantSession.pendingDraft = null;
       assistantSession.pendingQuestion = null;
       assistantSession.pendingInstruction = null;

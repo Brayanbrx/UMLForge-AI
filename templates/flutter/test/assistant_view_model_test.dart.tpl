@@ -52,6 +52,15 @@ void main() {
       await Future.wait([vm.confirm(), vm.confirm()]);
       expect(vm.draft, isNull);
       expect(await repository.local.queue(), hasLength(1));
+      final receipts = app.assistantSession.facts['confirmedChanges'];
+      expect(receipts, hasLength(1));
+      expect(
+        receipts.single['request'],
+        'Cambia telefono de Ana Perez a 77712345',
+      );
+      expect(receipts.single['data']['telefono'], '77712345');
+      expect(receipts.single['status'], 'saved_locally');
+      expect(app.assistantSession.evidence, isEmpty);
       expect(
         (await repository.local.rows('clientes')).first['telefono'],
         '77712345',

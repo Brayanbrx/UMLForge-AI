@@ -40,41 +40,13 @@ const downloadQuery = z.object({
 });
 
 /**
- * Generacion de codigo desde una pizarra (RF-060 a RF-072, RF-080 a RF-084).
+ * Generacion de codigo desde una pizarra
  *
- * **Lo que esta ruta aporta sobre el motor.** El generador ya existia y el banco
- * lo verifica sobre siete modelos; lo que faltaba era el camino desde la pizarra
- * viva hasta un ZIP descargable, que son dos pasos del guion de la defensa.
- *
- * **RA-08 y CA-060.1: se congela el snapshot, no el estado vivo.** Generar hace
- * dos cosas antes de emitir nada: pide al proceso de colaboracion que escriba el
- * documento vivo, y **copia** esa proyeccion a una version nueva que ya nadie
- * volvera a tocar. Quien siga editando escribira sobre la proyeccion viva; el
- * ZIP corresponde a la copia. Sin la copia, descargar el mismo artefacto dos
- * dias despues daria un proyecto distinto.
- *
- * **Por que no se guarda el ZIP.** La emision es determinista (RA-07: mismas
- * plantillas, misma IR, fechas fijas dentro del ZIP), asi que del mismo snapshot
- * salen siempre los mismos bytes. Guardar el binario obligaria a decidir donde
- * —base de datos, disco, almacenamiento de objetos— y a limpiarlo; regenerar
- * desde la version congelada da el mismo resultado y deja la base pequena. Lo
- * que se registra es **que** se genero, cuando y sobre que version, que es lo
- * que pide RF-072.
- *
- * **Y por que hace falta un manifiesto.** «Regenerar da el mismo resultado» solo
- * es cierto si se congela **todo** lo que entra en la emision, no solo el
- * modelo. Faltaban tres cosas y las tres se notaban:
- *
- *   - el `basePackage` que la persona escribia se usaba para responder y se
- *     perdia; **todas** las descargas salian con el paquete por defecto;
- *   - el nombre del proyecto se releia de la pizarra, asi que renombrarla
- *     cambiaba el artefacto de una generacion anterior;
- *   - las plantillas podian cambiar por debajo, y la descarga de la semana
- *     siguiente entregaba otros bytes bajo el mismo identificador.
- *
- * Ahora cada generacion congela nombre, paquete, version de esquema, huella de
- * plantillas y el SHA-256 de cada objetivo. Al descargar se compara: si los
- * bytes ya no son los mismos, se dice — no se entrega otro archivo en silencio.
+ * Generar hace dos cosas antes de emitir nada: pide al proceso de colaboracion que escriba el
+ * documento vivo, y copia esa proyeccion a una version nueva que ya nadie
+ * volvera a tocar.
+ * Cada generacion congela nombre, paquete, version de esquema, huella de
+ * plantillas y el SHA-256 de cada objetivo
  */
 export async function generationRoutes(
   app: FastifyInstance,
@@ -88,18 +60,12 @@ export async function generationRoutes(
     const { userId } = currentUser(request);
 
     const board = await findBoard(app, boardId);
-    // Generar no modifica la pizarra, pero produce el entregable del proyecto y
-    // queda registrado con nombre y apellido. La tabla de roles de `membership`
-    // lo asigna a EDITOR: un VIEWER mira, no produce artefactos.
+    // Generar no modifica la pizarra, produce el entregable del proyecto
     await requireWriteAccess(app.prisma, board.projectId, userId);
 
-    // Lo que la persona ve en pantalla puede ir por delante de la base: la
-    // proyeccion se guarda con retardo. Se pide al proceso de colaboracion que
-    // la vuelque antes de congelar nada.
+    // Lo que la persona ve en pantalla puede ir por delante de la base
     await volcarDocumento(options.config, board, request.headers.authorization);
 
-    // La IR se valida dentro de la misma transaccion y **antes** del INSERT. Asi
-    // un modelo o nombre invalido no deja una version congelada huerfana.
     const { snapshot, value: ir } = await congelarSnapshot(app, boardId, (congelado) =>
       construirIr(congelado, board.displayName, body.basePackage),
     );
@@ -109,8 +75,6 @@ export async function generationRoutes(
         boardId,
         snapshotVersion: snapshot.version,
         createdBy: userId,
-        // El manifiesto: lo que la descarga volvera a usar en lugar de releer
-        // el estado actual de la pizarra.
         projectName: board.displayName,
         artifactId: ir.project.artifactId,
         basePackage: ir.project.groupId,
@@ -121,9 +85,7 @@ export async function generationRoutes(
       select: { id: true, snapshotVersion: true, createdAt: true },
     });
 
-    // La fila nace CREATING y solo pasa a READY cuando el artefacto se ha
-    // emitido de verdad. Antes se registraba el exito sin comprobarlo: una
-    // generacion podia figurar en el historial y fallar al descargarla.
+    // La fila nace CREATING y pasa a READY cuando el artefacto se ha emitido
     let huellas: { spring: string; mobile?: string };
     try {
       huellas = await emitirHuellas(ir, body.includeMobile);
@@ -189,13 +151,10 @@ export async function generationRoutes(
 
   app.get('/generations/:generationId/download', async (request, reply) => {
     const { generationId } = generationParams.parse(request.params);
-    // Se sigue validando aunque solo haya un objetivo: `?target=dart` en un
-    // enlace viejo tiene que fallar con un 400 claro, no entregar el backend.
+    // Se sigue validando aunque solo haya un objetivo
     const { target } = downloadQuery.parse(request.query ?? {});
     const { userId } = currentUser(request);
 
-    // Marcar una emision interrumpida escribe en el proyecto. La autorizacion
-    // debe comprobarse antes, incluso si finalmente se rechaza la descarga.
     const access = await app.prisma.generation.findUnique({
       where: { id: generationId },
       select: { board: { select: { projectId: true } } },
@@ -231,9 +190,6 @@ export async function generationRoutes(
       );
     }
 
-    // Se regenera desde la version congelada **y con el manifiesto**, no desde
-    // el estado actual: ni el nombre de la pizarra ni el paquete se releen, que
-    // es lo que hacia que la descarga cambiara con el tiempo.
     const ir = construirIr(
       { version: generation.snapshotVersion, canonicalJson: generation.snapshot.canonicalJson },
       generation.projectName,
@@ -248,9 +204,6 @@ export async function generationRoutes(
       );
     const { nombre, zip } = await armarArtefacto(ir, target);
 
-    // La comprobacion que sostiene ADR-018. Si los bytes ya no son los que se
-    // registraron —porque cambio una plantilla o el generador—, entregar el
-    // archivo bajo el mismo identificador seria mentir en silencio.
     const registrado = target === 'mobile' ? generation.mobileSha256 : generation.springSha256;
     const actual = sha256(zip);
 
@@ -273,24 +226,13 @@ export async function generationRoutes(
       .header('content-type', 'application/zip')
       .header('content-disposition', `attachment; filename="${nombre}"`)
       .header('content-length', String(zip.byteLength))
-      // Permite comprobar la descarga sin abrirla, y es lo que compara la prueba.
+      // Permite comprobar la descarga sin abrirla, y es lo que compara la prueba
       .header('x-artifact-sha256', actual);
 
     return reply.send(zip);
   });
 
-  /**
-   * Elimina una generacion del historial (limpieza del servidor).
-   *
-   * El ZIP nunca se guardo en disco: lo unico que ocupa espacio es la fila del
-   * manifiesto y la **copia congelada** del snapshot sobre la que se regenera.
-   * Borrar la generacion borra tambien esa copia cuando ya nadie la referencia;
-   * la version 1 —la proyeccion viva que reescribe la colaboracion— no se toca
-   * nunca desde aqui.
-   *
-   * Es una accion de EDITOR, como generar: quien puede producir el entregable
-   * puede retirarlo. Un VIEWER lo descarga, no lo administra.
-   */
+  // Elimina una generacion del historial
   app.delete('/generations/:generationId', async (request, reply) => {
     const { generationId } = generationParams.parse(request.params);
     const { userId } = currentUser(request);
@@ -305,9 +247,7 @@ export async function generationRoutes(
     await app.prisma.$transaction(async (tx) => {
       await tx.generation.delete({ where: { id: generationId } });
 
-      // Cada generacion congela su propia copia, pero se comprueba igual: si
-      // alguna vez dos compartieran version, borrar una no puede dejar a la
-      // otra sin snapshot y por tanto sin descarga.
+      // Cada generacion congela su propia copia, pero se comprueba igual
       const referencias = await tx.generation.count({
         where: { boardId: generation.boardId, snapshotVersion: generation.snapshotVersion },
       });
@@ -325,9 +265,7 @@ export async function generationRoutes(
 }
 
 /**
- * Una fila CREATING solo vive mientras la peticion POST esta emitiendo. Si el
- * proceso se reinicia en medio, no hay tarea en segundo plano que vaya a
- * terminarla: dejarla asi para siempre comunica un progreso que ya no existe.
+ * Una fila CREATING solo vive mientras la peticion POST esta emitiendo
  */
 async function marcarInterrumpidas(
   app: FastifyInstance,
@@ -347,11 +285,7 @@ async function marcarInterrumpidas(
 }
 
 /**
- * Emite los dos objetivos y devuelve su huella.
- *
- * Se emiten **antes** de dar la generacion por buena. Cuesta unos cientos de
- * milisegundos sobre un modelo del tamano que exige RNF-03, y a cambio una
- * generacion que figura en el historial es una que se puede descargar.
+ * Emite los dos objetivos y devuelve su huella
  */
 async function emitirHuellas(
   ir: GenerationIr,
@@ -364,7 +298,7 @@ async function emitirHuellas(
   };
 }
 
-/** Lo que se le puede ensenar a un usuario de un fallo del servidor. */
+/** Lo que se le puede enseñar a un usuario de un fallo del servidor. */
 function mensajeDeError(error: unknown): string {
   const mensaje = error instanceof Error ? error.message : String(error);
   return mensaje.length > 500 ? `${mensaje.slice(0, 500)}…` : mensaje;
@@ -391,10 +325,7 @@ function construirIr(
       ...(basePackage === undefined ? {} : { basePackage }),
     });
   } catch (error) {
-    // Un modelo con errores no se genera (ADR-003: los errores bloquean la
-    // generacion, no la edicion). Se devuelven los hallazgos tal cual para que
-    // la interfaz muestre los mismos que el panel de validacion, y no un texto
-    // distinto que obligue a adivinar cual es cual.
+    // Un modelo con errores no se genera, los errores bloquean la generacion, no la edicion
     if (error instanceof InvalidGenerationModelError) {
       throw new HttpError(
         422,
@@ -416,16 +347,7 @@ function construirIr(
 }
 
 /**
- * Pide al proceso de colaboracion que escriba el documento vivo (RA-08).
- *
- * **Si esto falla, no se genera.** Continuar con lo que hubiera en la base
- * produciria un ZIP silenciosamente atrasado, y nadie lo notaria hasta abrirlo:
- * un error visible es mucho mejor que un proyecto al que le falta la ultima
- * clase justo el dia de la defensa.
- *
- * Se reenvia el token de quien pide: el proceso de colaboracion resuelve la
- * misma autorizacion que para entrar a la sala (RA-15), asi que no hace falta
- * ningun secreto nuevo entre procesos.
+ * Pide al proceso de colaboracion que escriba el documento vivo
  */
 async function volcarDocumento(
   config: Config,
@@ -461,15 +383,7 @@ async function volcarDocumento(
 }
 
 /**
- * Congela una version inmutable a partir de la proyeccion viva (RA-08).
- *
- * La version 1 es la foto vigente: el proceso de colaboracion la reescribe en
- * cada volcado. Generar sobre ella significaria que descargar el mismo artefacto
- * dos dias despues daria un proyecto distinto. Por eso se **copia** a una version
- * nueva, que ya nadie toca, y la generacion apunta a esa.
- *
- * Es tambien lo que hace cierto CA-060.1: quien siga editando escribira en la
- * version 1; el ZIP corresponde a la copia.
+ * Congela una version inmutable a partir de la proyeccion viva
  */
 async function congelarSnapshot<T>(
   app: FastifyInstance,
@@ -479,12 +393,7 @@ async function congelarSnapshot<T>(
   // Leer el maximo y despues insertar maximo+1 son dos operaciones, y dos
   // generaciones simultaneas leian el mismo maximo: la segunda moria con un 500
   // por clave duplicada, sin ninguna explicacion util.
-  //
-  // Calcularlo dentro del INSERT **no** basta: en el nivel de aislamiento por
-  // defecto, dos transacciones no ven la fila que la otra todavia no ha
-  // confirmado, asi que las dos calculan el mismo numero. Lo comprobo la prueba
-  // de cuatro peticiones simultaneas, que seguia dando dos 500.
-  //
+
   // Se bloquea la fila de la version viva mientras se decide el numero. Las
   // generaciones de la **misma** pizarra se ponen en fila —son milisegundos— y
   // las de pizarras distintas no se estorban.

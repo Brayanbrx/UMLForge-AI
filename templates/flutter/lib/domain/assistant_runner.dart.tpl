@@ -37,7 +37,7 @@ class AssistantRunner {
       throw const FormatException('Usa entre 1 y 2000 caracteres');
     checkActive();
     session.add('user', clean);
-    session.pendingInstruction ??= clean;
+    session.beginInstruction(clean);
     final transcript = <Map<String, dynamic>>[];
     final repeated = <String>{};
     var repairs = 0;
@@ -57,6 +57,18 @@ class AssistantRunner {
           'offsetMinutes': now.timeZoneOffset.inMinutes,
         },
         'pendingInstruction': session.pendingInstruction,
+        if (session.continuationRequest != null)
+          'continuation': {
+            'originalRequest': session.continuationRequest,
+            'completed': (session.facts['confirmedChanges'] as List)
+                .where(
+                  (entry) => entry['request'] == session.continuationRequest,
+                )
+                .toList(),
+            'nextAction':
+                'Prepara solo el siguiente cambio pendiente de originalRequest. Cada cambio requiere otra confirmacion. Si todos se completaron informa el resultado, no repitas operaciones.',
+          },
+        if (session.facts.isNotEmpty) 'facts': session.facts,
         if (session.pendingQuestion != null)
           'pendingQuestion': session.pendingQuestion,
         'history': session.recent(1600),
@@ -79,6 +91,20 @@ class AssistantRunner {
           9500)
         context['history'] = session.recent(600);
       if (utf8.encode(assistantSystemPrompt + jsonEncode(context)).length >
+          9500) {
+        context['catalog'] = [
+          for (final entry in tools.catalog)
+            if (entry['resource'] == resource)
+              entry
+            else
+              {
+                'resource': entry['resource'],
+                'name': entry['name'],
+                'fields': 'Usa describe_resource para consultar los campos',
+              },
+        ];
+      }
+      if (utf8.encode(assistantSystemPrompt + jsonEncode(context)).length >
           10000) {
         return _finish(
           'limit',
@@ -91,6 +117,15 @@ class AssistantRunner {
         raw = await complete(assistantSystemPrompt, jsonEncode(context));
         final reply = AssistantReply.parse(raw);
         checkActive();
+        if (reply.kind == 'no_change') {
+          session.pendingInstruction = null;
+          session.pendingQuestion = null;
+          return _finish(
+            'answer',
+            'De acuerdo. No he preparado ni guardado ningun cambio.',
+            step,
+          );
+        }
         if (reply.kind != 'tool') {
           if (reply.kind == 'answer' && !hasEvidence) {
             throw const FormatException(
@@ -136,8 +171,44 @@ class AssistantRunner {
         transcript.add(event);
         if (result['ok'] == true) {
           hasEvidence = true;
-          session.remember(event);
+          final metadata = tools.catalog
+              .where((item) => item['resource'] == reply.arguments['resource'])
+              .firstOrNull;
+          session.remember(
+            event,
+            primaryKey: metadata?['primaryKey'] as String?,
+          );
           if (reply.tool == 'prepare_change') {
+            final proposal = result['data']['proposal'] as Map;
+            if (proposal['action'] == 'CREATE') {
+              final supplied = '${session.pendingInstruction ?? ''}\n$clean'
+                  .toLowerCase();
+              final fields = metadata?['fields'] as List? ?? [];
+              final unsupported = <String>[];
+              for (final field in fields) {
+                if (field['required'] != true) continue;
+                if (field['name'] == metadata?['primaryKey'] &&
+                    field['type'] == 'UUID' &&
+                    reply.arguments['data'][field['name']] == null)
+                  continue;
+                final value = proposal['data'][field['name']];
+                if (value == null || !(value is String || value is num))
+                  continue;
+                final literal = value.toString().toLowerCase();
+                final present = value is num
+                    ? RegExp(
+                        '(^|[^0-9.])${RegExp.escape(literal)}([^0-9.]|\$)',
+                      ).hasMatch(supplied)
+                    : supplied.contains(literal);
+                if (!present) unsupported.add(field['name'].toString());
+              }
+              if (unsupported.isNotEmpty) {
+                final question =
+                    'Indica ${unsupported.join(', ')} para crear el registro. No usare valores que el modelo haya supuesto.';
+                session.pendingQuestion = question;
+                return _finish('question', question, step);
+              }
+            }
             session.pendingQuestion = null;
             session.pendingDraft = Map<String, dynamic>.from(result['data']);
             return _finish(
@@ -147,6 +218,11 @@ class AssistantRunner {
               draft: Map<String, dynamic>.from(result['data']),
             );
           }
+        } else if (result['error'] is Map &&
+            result['error']['retryable'] == false) {
+          session.pendingInstruction = null;
+          session.pendingQuestion = null;
+          return _finish('answer', result['error']['message'].toString(), step);
         } else if (++repairs > maxRepairs) {
           return _finish(
             'limit',

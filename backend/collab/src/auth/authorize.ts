@@ -3,8 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import { jwtVerify, type JWTPayload } from 'jose';
 
 /**
- * Autorizacion de la conexion de colaboracion (plan maestro 5.4, RA-15).
- *
+ * Autorizacion de la conexion de colaboracion
  *   Conexion entrante
  *         ↓
  *   Token valido y no expirado
@@ -14,23 +13,17 @@ import { jwtVerify, type JWTPayload } from 'jose';
  *   Rol determina el modo: OWNER y EDITOR escriben, VIEWER solo lee
  *         ↓
  *   Se une a la sala
- *
- * Sin esta verificacion, proteger las rutas HTTP no sirve de nada: cualquiera
+ * Sin esta verificacion, proteger rutas HTTP no sirve de nada: cualquiera
  * con el identificador de la sala editaria la pizarra.
  */
 
-const ISSUER = 'plataforma-uml';
-const AUDIENCE = 'plataforma-uml-clients';
+const ISSUER = 'plataforma-uml';            // Quien emitio el token?
+const AUDIENCE = 'plataforma-uml-clients';  // Para quien fue emitido?
 
 /**
- * Motivos que se le devuelven al cliente.
- *
- * `sin-acceso-a-la-pizarra` cubre a la vez "esa pizarra no existe" y "no eres
- * miembro", igual que el proceso HTTP responde 404 en los dos casos: distinguir
- * confirmaria que la pizarra existe a quien solo esta probando identificadores.
- *
- * El motivo detallado si queda en el registro del servidor, donde lo lee el
- * equipo y no quien intenta entrar.
+ * Motivos de Rechazo
+ * `sin-acceso-a-la-pizarra` cubre a la vez "esa pizarra no existe" y "no eres miembro",
+ * HTTP responde 404 en los dos casos.
  */
 export const CONNECTION_REJECTIONS = {
   SALA_INVALIDA: 'sala-invalida',
@@ -41,10 +34,14 @@ export const CONNECTION_REJECTIONS = {
 export type ConnectionRejection =
   (typeof CONNECTION_REJECTIONS)[keyof typeof CONNECTION_REJECTIONS];
 
+  /**
+   *  Error controlado para rechazar una conexion Websockets
+   *  reason es seguro para edvolver al cliente
+   *  message conserva el detalle para el log interno
+   */
 export class UnauthorizedConnection extends Error {
   /** Hocuspocus lo envia al cliente como motivo del rechazo. */
   public readonly reason: ConnectionRejection;
-
   public constructor(reason: ConnectionRejection, message: string) {
     super(message);
     this.name = 'UnauthorizedConnection';
@@ -52,6 +49,11 @@ export class UnauthorizedConnection extends Error {
   }
 }
 
+/**
+ * Representa al usuario autorizado dentro de la conexion
+ * queda asociado a la conexion WebSocket
+ * Hocuspocus conserva este contexto mientras la conexion esta activa
+ */
 export interface CollaborationContext {
   readonly userId: string;
   readonly email: string;
@@ -64,7 +66,6 @@ export interface CollaborationContext {
 
 /**
  * Nombre de sala: `project:{projectId}:board:{boardId}`.
- *
  * Se analiza en lugar de confiar: el cliente elige el nombre del documento, asi
  * que es entrada no confiable como cualquier otra.
  */
@@ -89,10 +90,13 @@ export interface AuthorizeOptions {
   readonly token: string;
 }
 
+/** Funcion Central:
+ * identifica la conexion y dice si puedo modificar el documento
+ */
 export async function authorizeConnection(
   options: AuthorizeOptions,
 ): Promise<{ context: CollaborationContext; readOnly: boolean }> {
-  const { projectId, boardId } = parseRoomName(options.documentName);
+  const { projectId, boardId } = parseRoomName(options.documentName); //valida la sala
 
   let payload: JWTPayload;
   try {
@@ -108,9 +112,12 @@ export async function authorizeConnection(
     );
   }
 
+  // Extraer claims
   const userId = payload.sub;
   const email = payload['email'];
   const sessionVersion = payload['sessionVersion'] ?? 0;
+
+  // Validar payload
   if (
     typeof userId !== 'string' ||
     typeof email !== 'string' ||
@@ -125,6 +132,7 @@ export async function authorizeConnection(
     );
   }
 
+  // Verificar usuario contra la BD
   const user = await options.prisma.user.findUnique({
     where: { id: userId },
     select: { sessionVersion: true, emailVerifiedAt: true },
@@ -156,7 +164,7 @@ export async function authorizeConnection(
     select: { role: true },
   });
 
-  // CA-A08.1: quien no es miembro no entra, aunque el identificador sea valido.
+  // Si no es miembro no entra, aunque el identificador sea valido.
   if (membership === null) {
     throw new UnauthorizedConnection(
       CONNECTION_REJECTIONS.SIN_ACCESO,
@@ -174,7 +182,8 @@ export async function authorizeConnection(
       expiresAt: payload.exp * 1000,
       sessionVersion,
     },
-    // CA-A08.2: el rol de lectura se conecta, ve y no escribe.
+    
+    // El rol de lectura se conecta, ve y no escribe.
     readOnly: !roleCanWrite(membership.role),
   };
 }

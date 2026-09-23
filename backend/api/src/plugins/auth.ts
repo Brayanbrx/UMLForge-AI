@@ -10,7 +10,6 @@ import {
 } from '../modules/auth/tokens.js';
 
 // Dentro de la ampliacion, `FastifyRequest` y `FastifyReply` resuelven a las
-// declaraciones del propio modulo: no se importan aqui arriba.
 declare module 'fastify' {
   interface FastifyInstance {
     readonly tokens: TokenIssuer;
@@ -63,12 +62,9 @@ export const authPlugin = fp(
       if (options.config.RATE_LIMIT_ENABLED && isExpensiveRequest(request))
         await enforceLimit(workQuota, request, reply);
 
-      // RNF-14: el actor entra en el registro estructurado de la peticion.
-      //
+      // El actor entra en el registro estructurado de la peticion
       // `setBindings` existe en pino pero no esta declarado en el tipo que
-      // Fastify expone, asi que se accede de forma estructural y opcional: si
-      // algun dia el registrador no lo tiene, se pierde un campo del log en
-      // lugar de caerse la peticion.
+      // Fastify expone, asi que se accede de forma estructural y opcional.
       const log = request.log as { setBindings?: (bindings: Record<string, unknown>) => void };
       log.setBindings?.({ actorId: claims.userId });
     });
@@ -76,10 +72,9 @@ export const authPlugin = fp(
   { name: 'auth' },
 );
 
-/** El usuario autenticado, para rutas que ya pasaron por `authenticate`. */
 export function currentUser(request: FastifyRequest): AccessTokenClaims {
   if (request.user === undefined) {
-    // Llegar aqui significa que a la ruta le falta el gancho de autenticacion.
+    // Llegar aqui significa que a la ruta le falta el gancho de autenticacion
     throw new Error('La ruta no declaro preHandler: authenticate');
   }
   return request.user;

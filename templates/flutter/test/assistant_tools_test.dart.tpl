@@ -81,6 +81,24 @@ void main() {
         'operation': 'count',
       });
       expect(count['data']['value'], 3);
+      final keyCount = await tools.execute('aggregate_records', {
+        'resource': 'clientes',
+        'operation': 'count',
+        'field': 'id',
+        'filters': [
+          {'field': 'nombre', 'op': 'contains', 'value': 'Ana'},
+        ],
+      });
+      expect(keyCount['ok'], true);
+      expect(keyCount['data']['value'], 2);
+      final decimalFilter = await tools.execute('search_records', {
+        'resource': 'clientes',
+        'filters': [
+          {'field': 'saldo', 'op': 'lt', 'value': '0.15'},
+        ],
+      });
+      expect(decimalFilter['ok'], true);
+      expect(decimalFilter['data']['records'].single['id'], 1);
     },
   );
   test(

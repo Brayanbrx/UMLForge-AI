@@ -18,11 +18,9 @@ const projectParams = z.object({ projectId: z.string().uuid() });
 const boardParams = z.object({ boardId: z.string().uuid() });
 
 /**
- * Pizarras (RF-002, RF-003 y RF-005).
- *
- * Cada pizarra tiene su propia sesion colaborativa y su propio documento
- * (RF-004). Aqui solo viven los metadatos: el estado vivo va por el proceso de
- * colaboracion, y estas rutas devuelven el nombre de sala con el que conectarse.
+ * Cada Pizarra tiene su propia sesion colaborativa y su propio documento
+ * Aqui solo viven los metadatos: el estado vivo va por el proceso de
+ * colaboracion, estas rutas devuelven el nombre de sala con el que conectarse
  */
 export async function boardRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', app.authenticate);
@@ -47,11 +45,6 @@ export async function boardRoutes(app: FastifyInstance): Promise<void> {
     const { userId } = currentUser(request);
     await requireWriteAccess(app.prisma, projectId, userId);
 
-    // Se crea la version 1 del snapshot canonico, vacia. Asi toda pizarra tiene
-    // una proyeccion inspeccionable desde el primer momento, sin que nadie tenga
-    // que abrirla antes. El documento binario lo crea el proceso de colaboracion
-    // la primera vez que alguien entra (RA-11). La escritura anidada es atomica:
-    // nunca puede quedar una pizarra creada sin su snapshot inicial.
     const inicial = emptyBoardState();
     const board = await app.prisma.board.create({
       data: {
@@ -74,8 +67,6 @@ export async function boardRoutes(app: FastifyInstance): Promise<void> {
     const board = await findBoard(app, boardId);
     const role = await requireMembership(app.prisma, board.projectId, userId);
 
-    // La version 1 es la proyeccion vigente; las posteriores son generaciones
-    // congeladas y no representan los cambios hechos despues de generar.
     const snapshot = await app.prisma.boardSnapshot.findUnique({
       where: { boardId_version: { boardId, version: 1 } },
       select: { version: true, canonicalJson: true, updatedAt: true },

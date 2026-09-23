@@ -28,8 +28,7 @@ export function isExpensiveRequest(request: FastifyRequest): boolean {
   );
 }
 
-// One API instance per deployment. Counters are bounded and reset on restart.
-// Multiple API replicas require a shared rate-limit store before scaling out.
+
 export const securityPlugin = fp(
   async (app: FastifyInstance, { config }: { config: Config }) => {
     await app.register(rateLimit, { global: false, cache: 10000 });

@@ -13,13 +13,12 @@ const projectBody = z.object({
 });
 
 const inviteBody = z.object({
-  // No se puede invitar como propietario: el proyecto tiene uno solo.
+  // No se puede invitar como propietario: el proyecto tiene uno solo
   role: z.enum(['EDITOR', 'VIEWER']),
 });
 
 const roleBody = z.object({
-  // El proyecto tiene un solo propietario, fijado en `ownerId`. Promover otro
-  // miembro a OWNER dejaria dos fuentes de verdad para la propiedad.
+  // El proyecto tiene un solo propietario, fijado en ownerId
   role: z.enum(['EDITOR', 'VIEWER']),
 });
 
@@ -27,7 +26,7 @@ const projectParams = z.object({ projectId: z.string().uuid() });
 const memberParams = projectParams.extend({ userId: z.string().uuid() });
 const acceptParams = z.object({ code: z.string().min(8).max(64) });
 
-/** Proyectos, membresias e invitaciones (RF-A04 a RF-A07 y RF-001). */
+// Proyectos, membresias e invitaciones
 export async function projectRoutes(
   app: FastifyInstance,
   options: { config: Config },
@@ -68,7 +67,7 @@ export async function projectRoutes(
     }));
   });
 
-  /** RF-A04: quien crea el proyecto queda como propietario. */
+  // Quien crea el proyecto queda como propietario
   app.post('/projects', async (request, reply) => {
     const body = projectBody.parse(request.body);
     const { userId } = currentUser(request);
@@ -129,7 +128,7 @@ export async function projectRoutes(
   });
 
   // -------------------------------------------------------------------------
-  // Miembros (RF-A07)
+  // Miembros
   // -------------------------------------------------------------------------
 
   app.get('/projects/:projectId/members', async (request) => {
@@ -161,9 +160,7 @@ export async function projectRoutes(
       select: { ownerId: true },
     });
 
-    // Degradar al propietario dejaria el proyecto sin nadie que pueda invitar,
-    // cambiar roles ni borrarlo. Transferir la propiedad es otra operacion y no
-    // entra en este alcance.
+    // Degradar al propietario dejaria el proyecto sin nadie que pueda invitar
     if (params.userId === project.ownerId) {
       throw conflict('owner_immutable', 'No se puede quitar el rol al propietario del proyecto.');
     }
@@ -182,8 +179,8 @@ export async function projectRoutes(
     const params = memberParams.parse(request.params);
     const actor = currentUser(request);
 
-    // Autorizar antes de leer el propietario evita que un extrano confirme que
-    // un proyecto y su dueno existen apuntando la ruta al identificador correcto.
+    // Autorizar antes de leer el propietario evita que un extra{o confirme que
+    // un proyecto y su dueño existen apuntando la ruta al identificador correcto
     if (params.userId !== actor.userId) {
       await requireRole(app.prisma, params.projectId, actor.userId, 'OWNER');
     } else {
@@ -210,7 +207,7 @@ export async function projectRoutes(
   });
 
   // -------------------------------------------------------------------------
-  // Invitaciones (RF-A05 y RF-A06)
+  // Invitaciones
   // -------------------------------------------------------------------------
 
   app.post('/projects/:projectId/invites', async (request, reply) => {
@@ -223,7 +220,7 @@ export async function projectRoutes(
       data: {
         projectId,
         // 32 caracteres aleatorios: no es adivinable, y es lo unico que protege
-        // el enlace porque no se verifica quien lo abre.
+        // el enlace porque no se verifica quien lo abre
         code: randomBytes(24).toString('base64url'),
         role: body.role,
         expiresAt: new Date(Date.now() + config.INVITE_TTL_SECONDS * 1000),
@@ -248,7 +245,7 @@ export async function projectRoutes(
     });
   });
 
-  /** RF-A06: aceptar la invitacion y quedar como miembro. */
+  // Aceptar la invitacion y quedar como miembro
   app.post('/invites/:code/accept', async (request) => {
     const { code } = acceptParams.parse(request.params);
     const { userId } = currentUser(request);
@@ -266,8 +263,8 @@ export async function projectRoutes(
       select: { role: true },
     });
 
-    // Aceptar dos veces no es un error: devuelve la membresia que ya hay. Un
-    // enlace compartido se abre mas de una vez y fallar la segunda solo confunde.
+    // Aceptar dos veces no es un error: devuelve la membresia que ya hay
+    // Un enlace compartido se abre mas de una vez y fallar la segunda solo confunde
     if (existing !== null) {
       return { projectId: invite.projectId, role: existing.role, alreadyMember: true };
     }

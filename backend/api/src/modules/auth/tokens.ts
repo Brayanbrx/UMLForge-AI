@@ -2,12 +2,9 @@ import { createHash, randomBytes } from 'node:crypto';
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 
 /**
- * Tokens de sesion (RF-A02 y RF-A03).
- *
- * Token de acceso de vida corta mas token de refresco rotativo. El de acceso es
- * el que se pasa al abrir el WebSocket, que es la razon por la que conviene un
- * token y no solo una cookie de sesion: el servidor de colaboracion tiene que
- * poder autorizar la conexion antes de entregar el documento (RA-15).
+ * Tokens de sesion
+ * Token de acceso de vida corta mas token de refresco rotativo
+ * El de acceso es el que se pasa al abrir el WebSocket
  */
 
 export interface AccessTokenClaims {
@@ -65,7 +62,7 @@ export function createTokenIssuer(secret: string, accessTtlSeconds: number): Tok
 
       const userId = payload.sub;
       const email = payload['email'];
-      // Los tokens anteriores a la migración pertenecen a la versión inicial.
+      // Los tokens anteriores a la migración pertenecen a la versión inicial
       const sessionVersion = payload['sessionVersion'] ?? 0;
       if (
         typeof userId !== 'string' ||
@@ -82,25 +79,13 @@ export function createTokenIssuer(secret: string, accessTtlSeconds: number): Tok
   };
 }
 
-/**
- * El token de refresco es un secreto opaco, no un JWT.
- *
- * No necesita transportar informacion —siempre se busca en la base para poder
- * revocarlo— y no siendo verificable sin consultar, un token robado deja de
- * servir en cuanto se rota o se revoca.
- */
+// El token de refresco es un secreto opaco, no un JWT.
 export function createRefreshToken(): { token: string; hash: string } {
   const token = randomBytes(48).toString('base64url');
   return { token, hash: hashRefreshToken(token) };
 }
 
-/**
- * Se guarda el hash, nunca el token.
- *
- * SHA-256 basta aqui, a diferencia de las contrasenas: el token tiene 384 bits
- * de entropia aleatoria, asi que no hay diccionario que probar y una derivacion
- * lenta solo anadiria latencia a cada renovacion.
- */
+// Se guarda el hash, nunca el token. SHA-256 basta aqui
 export function hashRefreshToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }

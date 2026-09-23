@@ -42,6 +42,7 @@ describe('paquete Android del diagrama', () => {
         'mobile/lib/domain/assistant_runner.dart',
         'mobile/lib/domain/assistant_protocol.dart',
         'mobile/lib/domain/assistant_session.dart',
+        'mobile/lib/domain/assistant_budget.dart',
         'mobile/lib/domain/assistant_ports.dart',
         'mobile/lib/data/assistant_tools.dart',
         'mobile/lib/data/assistant_runtime.dart',

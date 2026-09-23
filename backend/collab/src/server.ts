@@ -1,6 +1,8 @@
 import { buildCollabServer, SERVICE_NAME } from './app.js';
 import { loadConfig } from './config.js';
 
+// CICLO DE VIDA DEL PROCESO
+
 const config = loadConfig();
 const collab = buildCollabServer(config);
 

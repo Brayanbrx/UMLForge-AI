@@ -22,10 +22,8 @@ const loginBody = z.object({
 });
 
 /**
- * Sesion: registro, inicio, renovacion y cierre (RF-A01 a RF-A03).
- *
- * El registro requiere activar el correo antes de emitir una sesión.
- * En desarrollo MAIL_PROVIDER=log permite leer el enlace en el servidor.
+ * Sesion: registro, inicio, renovacion y cierre
+ * El registro requiere activar el correo antes de emitir una sesión
  */
 export async function authRoutes(
   app: FastifyInstance,
@@ -66,9 +64,6 @@ export async function authRoutes(
       });
       if (consumedRefreshId !== undefined) {
         const now = new Date();
-        // El enlace al sucesor se guarda con la revocacion, en la misma fila y
-        // la misma transaccion: si la emision falla, no queda un token revocado
-        // apuntando a otro que no existe.
         const consumed = await tx.refreshToken.updateMany({
           where: {
             id: consumedRefreshId,
@@ -113,9 +108,8 @@ export async function authRoutes(
         },
       });
     } catch (error) {
-      // El `findUnique` anterior mejora el camino normal, pero no evita que dos
-      // registros simultaneos pasen la comprobacion. La restriccion UNIQUE es
-      // la autoridad final y su carrera tambien debe conservar el contrato 409.
+      // findUnique anterior mejora el camino normal, pero no evita que dos
+      // registros simultaneos pasen la comprobacion
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw conflict('email_taken', 'Ya existe una cuenta con ese correo.');
       }
@@ -133,9 +127,8 @@ export async function authRoutes(
 
     const user = await app.prisma.user.findUnique({ where: { email } });
 
-    // Se comprueba la contrasena aunque el usuario no exista, contra un hash
-    // ficticio, para que el tiempo de respuesta no revele que correos estan
-    // registrados.
+    // Se comprueba la contraseña aunque el usuario no exista, contra un hash ficticio,
+    // para que el tiempo de respuesta no revele que correos estan registrados
     const stored = user?.passwordHash ?? DUMMY_HASH;
     const valid = await verifyPassword(body.password, stored);
 
@@ -155,19 +148,8 @@ export async function authRoutes(
   });
 
   /**
-   * El sucesor de un token revocado, cuando su rotacion no llego a entregarse.
-   *
-   * Rotar en cada renovacion deja una ventana que la red puede partir por la
-   * mitad: la peticion llega, el servidor revoca el token y emite otro, y la
-   * respuesta se pierde —basta recargar en ese instante, que es justo lo que
-   * hace quien acaba de recuperar la conexion—. El navegador conserva entonces
-   * un token que el servidor ya no acepta y la sesion queda cerrada para
-   * siempre, sin que nadie haya hecho nada malo.
-   *
-   * Se distingue de una reutilizacion real por el sucesor: si sigue **sin
-   * usarse**, nadie recibio aquella respuesta. En cuanto el sucesor se usa, el
-   * cliente legitimo si la recibio y presentar el token viejo vuelve a ser lo
-   * que siempre fue —un replay— y se rechaza. Fuera del margen, tambien.
+   * El navegador conserva un token que el servidor ya no acepta
+   * y la sesion queda cerrada para siempre.
    */
   const MARGEN_ROTACION_MS = 30_000;
 
@@ -188,11 +170,7 @@ export async function authRoutes(
     return { id: sucesor.id };
   }
 
-  /**
-   * RF-A03. El token de refresco es rotativo: cada renovacion revoca el anterior
-   * y entrega uno nuevo. Reutilizar uno ya rotado no funciona, salvo el caso que
-   * describe `rotacionSinEntregar`: su sucesor sin estrenar y dentro del margen.
-   */
+  // El token de refresco es rotativo: cada renovacion revoca el anterior y entrega uno nuevo
   app.post('/auth/refresh', async (request, reply) => {
     const presented = request.cookies[REFRESH_COOKIE];
     if (presented === undefined) throw unauthorized('No hay sesion que renovar.');
@@ -203,7 +181,7 @@ export async function authRoutes(
     });
 
     if (stored === null) {
-      // No se borra la cookie: otra pestana pudo rotar el token mientras esta
+      // No se borra la cookie: otra pestaña pudo rotar el token mientras esta
       // peticion estaba en vuelo, y un Set-Cookie tardio borraria el nuevo.
       throw unauthorized('La sesion expiro. Inicia sesion de nuevo.');
     }
@@ -212,7 +190,7 @@ export async function authRoutes(
       const sucesor = await rotacionSinEntregar(stored);
       if (sucesor === null) throw unauthorized('La sesion expiro. Inicia sesion de nuevo.');
       // Se consume el sucesor que nadie llego a recibir y se emite otro: la
-      // sesion sigue teniendo un unico token vivo.
+      // sesion sigue teniendo un unico token vivo
       return issueSession(reply, stored.user, sucesor.id);
     }
 
@@ -251,10 +229,7 @@ export async function authRoutes(
   });
 }
 
-/**
- * Hash de una contrasena que nadie tiene. Solo existe para que el camino del
- * usuario inexistente cueste lo mismo que el del usuario real.
- */
+// Hash falso, para que el usuario no existente cueste lo mismo que el usuario real.
 const DUMMY_HASH =
   'scrypt$65536$8$1$AAAAAAAAAAAAAAAAAAAAAA==$' +
   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +

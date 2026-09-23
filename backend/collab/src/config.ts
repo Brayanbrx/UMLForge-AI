@@ -8,13 +8,10 @@ const schema = z.object({
 
   DATABASE_URL: z.string().min(1),
 
-  // El mismo secreto que firma los tokens en el proceso HTTP. Los dos procesos
-  // comparten la clave porque uno emite y el otro verifica.
+  // El mismo secreto que firma los tokens en el proceso HTTP.
+  //  Los dos procesos comparten la clave porque uno emite y el otro verifica.
   JWT_SECRET: z.string().min(32, 'JWT_SECRET debe tener al menos 32 caracteres'),
 
-  // Cuanto se espera tras el ultimo cambio antes de escribir en la base. Guardar
-  // en cada tecla castigaria la base sin ganar nada: el estado vivo esta en
-  // memoria y replicado en cada navegador conectado.
   STORE_DEBOUNCE_MS: z.coerce.number().int().nonnegative().default(2000),
   STORE_MAX_DEBOUNCE_MS: z.coerce.number().int().positive().default(10_000),
 });

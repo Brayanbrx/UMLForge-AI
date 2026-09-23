@@ -11,24 +11,11 @@ const historyQuery = z.object({
 });
 
 /**
- * Auditoria de lotes (RF-A09 y CA-023.1).
- *
- * **Por que existe una ruta y no viaja por el canal de tiempo real.** CA-023.1
- * es explicito: el protocolo colaborativo transporta actualizaciones del
- * documento, no comandos de dominio. El comando se aplica localmente y viaja la
- * actualizacion resultante. Los comandos se registran **para auditoria**, no
- * para sincronizar — y por eso el registro va aparte, por HTTP, donde ya hay una
- * sesion autenticada.
- *
- * **El actor no lo elige el cliente.** El lote llega con un `actorId` porque el
- * esquema del dominio lo exige, pero lo que se guarda es el usuario de la
- * sesion. Aceptar el del cuerpo permitiria atribuir cambios a otra persona, que
- * es justamente lo que la auditoria tiene que impedir.
- *
- * **Registrar no puede romper la edicion.** El lote ya se aplico en el documento
- * cuando esto se llama; si el registro falla, se responde el error pero la
- * pizarra sigue como estaba. Por eso el cliente lo envia sin esperar la
- * respuesta.
+ * Auditoria de lotes
+ * El protocolo colaborativo transporta actualizaciones del documento, no comandos de dominio
+ * El comando se aplica localmente y viaja la actualizacion resultante
+ * Los comandos se registran para auditoria, no para sincronizar y por eso el registro va aparte
+ * por HTTP, donde ya hay una sesion autenticada.
  */
 export async function auditRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', app.authenticate);
@@ -41,9 +28,8 @@ export async function auditRoutes(app: FastifyInstance): Promise<void> {
     const board = await findBoard(app, boardId);
     await requireWriteAccess(app.prisma, board.projectId, userId);
 
-    // Idempotente por `batchId`: reintentar el envio tras un corte de red no
-    // duplica la entrada del registro. El lote es la unidad transaccional
-    // (RA-03) y aqui tambien es la unidad de identidad.
+    // Idempotente por batchId: reintentar envio tras corte de red no duplica entrada del registro
+    // El lote es la unidad transaccional y tambien es la unidad de identidad
     await app.prisma.auditOperation.upsert({
       where: { boardId_batchId: { boardId, batchId: batch.batchId } },
       update: {},
@@ -67,7 +53,7 @@ export async function auditRoutes(app: FastifyInstance): Promise<void> {
 
     const board = await findBoard(app, boardId);
     // Leer el historial no modifica nada: un VIEWER puede revisar quien cambio
-    // que, que es para lo que sirve un registro de auditoria.
+    // que, que es para lo que sirve un registro de auditoria
     await requireMembership(app.prisma, board.projectId, userId);
 
     const operaciones = await app.prisma.auditOperation.findMany({
@@ -91,7 +77,7 @@ export async function auditRoutes(app: FastifyInstance): Promise<void> {
       actorId: operacion.actorId,
       createdAt: operacion.createdAt,
       // El historial se lee para saber quien hizo que, no para reproducir el
-      // modelo: se resume en lugar de devolver cada carga entera.
+      // modelo: se resume en lugar de devolver cada carga entera
       commands: resumir(operacion.payload),
     }));
   });

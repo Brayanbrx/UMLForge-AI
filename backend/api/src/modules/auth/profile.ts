@@ -8,22 +8,11 @@ import { hashPassword, verifyPassword } from './passwords.js';
 import { createRefreshToken, hashRefreshToken } from './tokens.js';
 
 /**
- * Perfil, cambio de contrasena y recuperacion (RF-A10 y RF-A11).
+ * Perfil, cambio de contrasena y recuperacion
  *
- * Tres reglas gobiernan este archivo:
- *
- * **Cambiar la contrasena cierra las demas sesiones.** Quien la cambia porque
- * cree que alguien mas la sabe espera exactamente eso; dejarlas abiertas
- * convierte el cambio en un gesto sin efecto. Se conserva la sesion desde la que
- * se hizo el cambio, para no expulsar a quien lo pidio.
- *
- * **Pedir recuperacion nunca revela si el correo existe.** La respuesta es la
- * misma para una cuenta real y para una inventada. Lo contrario convierte el
- * formulario en un comprobador de correos registrados.
- *
- * **El testigo se guarda con hash y es de un solo uso.** Igual que el de
- * refresco: quien lea la base no puede usarlo, y un enlace ya usado no vale dos
- * veces.
+ * 1. Cambiar la contrasena cierra las demas sesiones
+ * 2. Pedir recuperacion nunca revela si el correo existe
+ * 3. El testigo se guarda con hash y es de un solo uso
  */
 
 const perfilBody = z.object({
@@ -47,13 +36,7 @@ const restablecerBody = z.object({
 /** Formatos que se aceptan como foto. Cualquier otro se rechaza antes de tocar la base. */
 const TIPOS_DE_IMAGEN = ['image/png', 'image/jpeg', 'image/webp'] as const;
 
-/**
- * Tope de la foto ya recortada.
- *
- * La interfaz la reduce a 256x256 antes de enviarla, asi que 256 kB es holgado.
- * El limite esta aqui igualmente: el navegador no es quien decide cuanto ocupa
- * una fila de la base.
- */
+// Tope de la foto ya recortada
 const MAXIMO_AVATAR = 256 * 1024;
 
 const avatarBody = z.object({
@@ -131,25 +114,6 @@ export async function profileRoutes(
     return null;
   });
 
-  /**
-   * La foto, por identificador de usuario.
-   *
-   * **Sin sesion, a proposito, y esto merece explicacion.** La primera version
-   * exigia el token de acceso, y la foto no se veia nunca: una etiqueta `<img>`
-   * pide la imagen con las cookies del navegador, no con la cabecera
-   * `Authorization`, asi que la peticion llegaba sin token y respondia 401. Lo
-   * descubrio la prueba de navegador; leyendo el codigo no se ve.
-   *
-   * De las salidas posibles se elige la simple: la ruta queda abierta y la
-   * proteccion es el identificador, un UUID que no se publica en ningun sitio y
-   * que solo aparece ante quien ya es miembro. Una foto de perfil no es un dato
-   * reservado. Las alternativas eran peor negocio: aceptar la cookie de
-   * refresco como credencial mezcla dos tipos de testigo, y descargar cada
-   * avatar con `fetch` obliga a gestionar un blob por cara.
-   *
-   * Lo que no se filtra: un identificador inventado y uno real sin foto
-   * responden lo mismo, un 404. La ruta no dice quien existe.
-   */
   app.get('/auth/users/:userId/avatar', async (request, reply) => {
     const { userId } = z.object({ userId: z.string().uuid() }).parse(request.params);
 
@@ -165,15 +129,13 @@ export async function profileRoutes(
     reply
       .header('content-type', user.avatarMimeType)
       .header('content-length', String(user.avatar.byteLength))
-      // Corta: cambiar la foto tiene que notarse enseguida. La direccion
-      // lleva ademas una version, que es lo que salta la cache al subir una.
       .header('cache-control', 'public, max-age=60');
 
     return reply.send(Buffer.from(user.avatar));
   });
 
   // -------------------------------------------------------------------------
-  // Cambio de contrasena
+  // Cambio de contraseña
   // -------------------------------------------------------------------------
 
   app.post('/auth/me/password', { preHandler: app.authenticate }, async (request) => {
@@ -205,8 +167,7 @@ export async function profileRoutes(
           sessionVersion: { increment: 1 },
         },
       }),
-      // Las demas sesiones se cierran; la actual sobrevive para no expulsar a
-      // quien acaba de cambiarla.
+      // Las demas sesiones se cierran; la actual sobrevive
       app.prisma.refreshToken.updateMany({
         where: {
           userId,
@@ -262,9 +223,7 @@ export async function profileRoutes(
           ].join('\n'),
         });
       } catch (error) {
-        // El fallo se registra y no se propaga: contarlo distinguiria una
-        // cuenta existente de una inventada, que es justo lo que esta ruta no
-        // puede revelar.
+        // El fallo se registra y no se propaga
         app.log.error(
           {
             proveedor: mail.name,
@@ -289,8 +248,7 @@ export async function profileRoutes(
     });
 
     if (registro === null || registro.usedAt !== null || registro.expiresAt <= new Date()) {
-      // Un solo mensaje para las tres situaciones: distinguirlas le diria a
-      // quien prueba testigos cual de ellos existio alguna vez.
+      // Un solo mensaje para las tres situaciones
       throw new HttpError(
         400,
         'enlace_invalido',
@@ -303,7 +261,7 @@ export async function profileRoutes(
 
     await app.prisma.$transaction(async (tx) => {
       // El cambio bloquea la fila de usuario y serializa tambien dos enlaces
-      // distintos de la misma cuenta. Si el consumo falla, todo se revierte.
+      // distintos de la misma cuenta.
       await tx.user.update({
         where: { id: registro.userId },
         data: { passwordHash, sessionVersion: { increment: 1 } },
@@ -315,9 +273,7 @@ export async function profileRoutes(
       if (consumido.count !== 1) {
         throw new HttpError(400, 'enlace_invalido', 'Ese enlace ya se uso.');
       }
-      // Aqui si se cierran **todas**: quien restablece por haber perdido el
-      // acceso no tiene ninguna sesion que valga la pena conservar, y puede que
-      // otra persona tenga una abierta.
+      // Aqui si se cierran todas
       await tx.refreshToken.updateMany({
         where: { userId: registro.userId, revokedAt: null },
         data: { revokedAt: ahora },

@@ -16,22 +16,9 @@ import { currentUser } from '../../plugins/auth.js';
 import { requireMembership, requireWriteAccess } from '../projects/membership.js';
 
 /**
- * Asistente por texto y voz (RF-030 a RF-037).
- *
- * **Que hace este modulo y que no.** Recibe una instruccion y el estado de la
- * pizarra, se lo pasa al proveedor a traves del puerto, resuelve la propuesta
- * contra el modelo real y devuelve un lote listo — o una pregunta. **No aplica
- * nada.**
- *
- * Aplicarlo es cosa del navegador, por el mismo camino que la interfaz grafica:
- * `applyBatchToDocument` sobre el documento colaborativo. Asi hay un solo
- * escritor por documento y el asistente es literalmente otro adaptador que
- * produce comandos (RA-01), no una via paralela con sus propias reglas.
- *
- * El estado llega en la peticion y no se lee del snapshot persistido: el
- * snapshot lo escribe el proceso de colaboracion con retardo, y el asistente
- * tiene que razonar sobre lo que el usuario esta viendo, no sobre lo que habia
- * hace dos segundos.
+ * Asistente por texto y voz
+ * Recibe una instruccion y el estado de la pizarra, se lo pasa al proveedor a traves del puerto,
+ * resuelve la propuesta contra el modelo real y devuelve un lote listo o una pregunta.
  */
 
 const boardParams = z.object({ boardId: z.string().uuid() });
@@ -56,7 +43,7 @@ const questionBody = z.object({
 });
 
 const transcribeBody = z.object({
-  /** Audio en base64. Respaldo del reconocimiento del navegador (6.2). */
+  /** Audio en base64. Respaldo del reconocimiento del navegador*/
   audio: z.string().min(1).max(8_000_000),
   mediaType: z.string().min(1).max(100),
 });
@@ -72,12 +59,7 @@ export async function aiRoutes(
 
   app.addHook('preHandler', app.authenticate);
 
-  /**
-   * RF-030 y RF-032: instruccion por texto (o dictada) a lote validado.
-   *
-   * Exige permiso de escritura aunque no escriba: devolver un lote listo para
-   * aplicar a quien no puede aplicarlo solo genera un rechazo mas adelante.
-   */
+   // Instruccion por texto (o dictada) a lote validado
   app.post('/boards/:boardId/assistant/instruction', async (request, reply) => {
     const { boardId } = boardParams.parse(request.params);
     const body = instructionBody.parse(request.body);
@@ -104,7 +86,7 @@ export async function aiRoutes(
       origin: 'AI_TEXT',
     });
 
-    // RNF-14: el registro estructurado deja el proveedor, la latencia y el
+    // El registro estructurado deja el proveedor, la latencia y el
     // desenlace, que es lo que se mira cuando el asistente hace algo raro.
     request.log.info(
       {
@@ -122,14 +104,14 @@ export async function aiRoutes(
     return { ...outcome, rationale: proposal.rationale ?? null };
   });
 
-  /** RF-036 y RF-037: consultar sin modificar. */
+  /** Consultar sin modificar. */
   app.post('/boards/:boardId/assistant/question', async (request, reply) => {
     const { boardId } = boardParams.parse(request.params);
     const body = questionBody.parse(request.body);
     const { userId } = currentUser(request);
 
     const board = await findBoard(app, boardId);
-    // Solo lectura: un VIEWER puede consultar al asistente sin modificar (5.5).
+    // Solo lectura: un VIEWER puede consultar al asistente sin modificar.
     await requireMembership(app.prisma, board.projectId, userId);
 
     const issues = validateModel(body.model).map((hallazgo) => ({
@@ -152,7 +134,7 @@ export async function aiRoutes(
     return { answer: text, issues };
   });
 
-  /** Respaldo de transcripcion, para navegadores sin reconocimiento (6.2). */
+  /** Respaldo de transcripcion, para navegadores sin reconocimiento */
   app.post(
     '/assistant/transcribe',
     { bodyLimit: TRANSCRIBE_BODY_LIMIT },
@@ -173,7 +155,7 @@ export async function aiRoutes(
     },
   );
 
-  /** Uso acumulado del proceso, para diagnosticar y para la defensa (6.5). */
+  /** Uso acumulado del proceso, para diagnosticar y para la defensa */
   app.get('/assistant/usage', async () => ({
     provider: ports.llm.name,
     calls: ports.usageLog.length,
@@ -183,9 +165,8 @@ export async function aiRoutes(
 
 /**
  * Traduce los fallos del proveedor a respuestas HTTP con sentido.
- *
- * Un proveedor caido no es un fallo del servidor: es una dependencia externa que
- * no respondio, y el usuario tiene que poder distinguirlo para saber si merece
+ * Un proveedor caido no es un fallo del servidor: es dependencia externa que
+ * no respondio y el usuario tiene que poder distinguirlo para saber si merece
  * la pena reintentar.
  */
 async function conProveedor<T>(llamar: () => Promise<T>): Promise<T> {
@@ -200,14 +181,7 @@ async function conProveedor<T>(llamar: () => Promise<T>): Promise<T> {
       );
     }
     if (error instanceof ProviderContractError) {
-      // El mensaje ya está saneado por el adaptador y diferencia una credencial,
-      // un modelo retirado, JSON inválido o una propuesta fuera del vocabulario.
-      // Ocultarlo detrás de «no se pudo interpretar» hizo que un 404 de modelo
-      // pareciera un fallo del prompt y volvió innecesariamente difícil corregir
-      // la configuración.
-      // Con el nombre del proveedor delante. Sin el, un fallo del respaldo se
-      // lee como un fallo del primario, y quien lo ve busca el problema en la
-      // configuracion equivocada.
+
       throw new HttpError(502, 'ai_provider_contract', `${error.provider}: ${error.message}`);
     }
     throw error;

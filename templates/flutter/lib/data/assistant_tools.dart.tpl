@@ -21,6 +21,7 @@ class LocalAssistantTools implements AssistantTools {
           'resource': r.resource,
           'name': r.className,
           'primaryKey': r.primaryKey,
+          'primaryKeyMutable': false,
           'fields': [
             for (final field in r.fields.take(24))
               {
@@ -181,6 +182,15 @@ class LocalAssistantTools implements AssistantTools {
         if (revision != null) 'revision': revision,
         if (nextCursor != null) 'nextCursor': nextCursor,
       };
+    } on _TerminalToolError catch (error) {
+      return {
+        'ok': false,
+        'error': {
+          'code': error.code,
+          'message': error.message,
+          'retryable': false,
+        },
+      };
     } on FormatException catch (error) {
       return {
         'ok': false,
@@ -275,7 +285,15 @@ class LocalAssistantTools implements AssistantTools {
       }
       if (!value.containsKey('value'))
         throw const FormatException('Falta value en filtro');
-      final v = _typed(f, value['value']);
+      var supplied = value['value'];
+      // Numeric strings from tool adapters are unambiguous only in read filters.
+      // Do not coerce identifiers or proposed writes.
+      if (f.javaType == 'BigDecimal' &&
+          supplied is String &&
+          RegExp(r'^-?(0|[1-9][0-9]*)(\.[0-9]+)?$').hasMatch(supplied)) {
+        supplied = num.tryParse(supplied);
+      }
+      final v = _typed(f, supplied);
       if (op != 'eq' && (v == null || v is bool))
         throw const FormatException('Comparacion no soportada');
       return <String, dynamic>{'field': f.name, 'op': op, 'value': v};
@@ -321,7 +339,9 @@ class LocalAssistantTools implements AssistantTools {
             'Se supero el limite de 5000 registros; no es un total completo.',
       };
     if (op == 'count') {
-      if (args.containsKey('field'))
+      // Counting a non-null primary key is exactly counting rows. Other fields
+      // can contain nulls and must not silently change the requested meaning.
+      if (args.containsKey('field') && args['field'] != resource.primaryKey)
         throw const FormatException('count cuenta registros; omite field');
       return {'operation': op, 'value': rows.length, 'records': rows.length};
     }
@@ -392,6 +412,17 @@ class LocalAssistantTools implements AssistantTools {
       final current = await _read(resource, id);
       if (jsonEncode(current) != jsonEncode(expected))
         throw const FormatException('El registro cambio; vuelve a consultarlo');
+      if (action == 'UPDATE' &&
+          (args['data'] as Map).containsKey(resource.primaryKey)) {
+        final nextKey = _typed(resource.key, args['data'][resource.primaryKey]);
+        if (nextKey == null ||
+            resource.key.identity(nextKey) != resource.key.identity(id)) {
+          throw _TerminalToolError(
+            'immutable_primary_key',
+            'No se puede cambiar la clave primaria ${resource.primaryKey} del registro $id. El registro existe y no se modifico. Puedes editar sus otros campos.',
+          );
+        }
+      }
     }
     final proposal = Proposal.parse(
       jsonEncode({
@@ -407,6 +438,15 @@ class LocalAssistantTools implements AssistantTools {
         await _read(resource, proposal.data![resource.primaryKey]) != null) {
       throw const FormatException('Ya existe esa clave');
     }
+    if (action == 'UPDATE' &&
+        resource.fields.every(
+          (field) => proposal.data![field.name] == expected![field.name],
+        )) {
+      throw const _TerminalToolError(
+        'no_changes',
+        'El cambio propuesto no modifica ningun campo. No se ha guardado nada.',
+      );
+    }
     checkActive();
     return {
       'draftId': const Uuid().v4(),
@@ -414,6 +454,11 @@ class LocalAssistantTools implements AssistantTools {
       'expected': expected,
     };
   }
+}
+
+class _TerminalToolError implements Exception {
+  final String code, message;
+  const _TerminalToolError(this.code, this.message);
 }
 
 class _Decimal {
